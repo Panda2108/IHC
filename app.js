@@ -2,7 +2,7 @@ const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
 
 createApp({
     setup() {
-        // MockData integrada apuntando a tu carpeta local 'imagenes'
+        // MockData integrada apuntando a tu carpeta local 'imagenes' (INTACTA)
         const categories = ["TODOS", "ALIMENTOS BÁSICOS", "HIGIENE PERSONAL", "LIMPIEZA DEL HOGAR"];
         const products = [
             // === ALIMENTOS BÁSICOS ===
@@ -32,7 +32,11 @@ createApp({
         // Estados Reactivos
         const activeCategory = ref('TODOS');
         const view = ref('tienda'); 
-        const cart = ref([]);
+        
+        // --- AGREGADO JS: Cargar el carrito desde LocalStorage al iniciar ---
+        const savedCart = localStorage.getItem('esencia_carrito');
+        const cart = ref(savedCart ? JSON.parse(savedCart) : []);
+
         const isCartOpen = ref(false);
         const isSearchOpen = ref(false);
         const deliveryMethod = ref('recoger');
@@ -44,6 +48,11 @@ createApp({
         const showOrderSuccess = ref(false);
         const countdown = ref(0);
         const activeOrder = ref([]);
+
+        // --- AGREGADO JS: Guardar automáticamente en LocalStorage cuando el carrito cambie ---
+        watch(cart, (newCart) => {
+            localStorage.setItem('esencia_carrito', JSON.stringify(newCart));
+        }, { deep: true });
 
         // Métodos de Carrito
         const addToCart = (product) => {
@@ -161,15 +170,34 @@ createApp({
             }
         });
 
-        // Forzar renderizado de iconos de Lucide al mutar el DOM
-        watch([view, isCartOpen, isSearchOpen, showOrderSuccess], () => {
+        // --- AGREGADO JS: Intersection Observer para animaciones nativas ---
+        const initScrollAnimations = () => {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.1 });
+
+            // Esperar a que los elementos estén en el DOM
+            setTimeout(() => {
+                document.querySelectorAll('.product-card').forEach(el => observer.observe(el));
+            }, 50);
+        };
+
+        // Forzar renderizado de iconos y re-inicializar animaciones al mutar el DOM
+        watch([view, isCartOpen, isSearchOpen, showOrderSuccess, filteredProducts], () => {
             nextTick(() => {
                 if(window.lucide) window.lucide.createIcons();
+                initScrollAnimations();
             });
         });
 
         onMounted(() => {
             if(window.lucide) window.lucide.createIcons();
+            initScrollAnimations();
         });
 
         return {
