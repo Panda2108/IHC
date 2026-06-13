@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Esencia Urbana - Tienda Orgánica</title>
+    <!-- Mantenemos Tailwind para layouts y contenedores principales -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inclusive+Sans:ital,wght@0,300..400;1,300..400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div id="app" v-cloak>
+        
+        <div v-if="showOrderSuccess" role="status" aria-live="assertive" class="fixed top-24 left-1/2 -translate-x-1/2 z-[200] w-full max-w-lg px-4">
+            <div class="bg-white rounded-[2rem] shadow-2xl p-6 border border-gray-100 flex items-center gap-6 animate-fade-in">
+                <div :class="['p-4 rounded-2xl', countdown < 30 ? 'bg-red-50 text-red-50 animate-pulse' : 'bg-[#708D71]/10 text-[#708D71]']">
+                    <i data-lucide="clock" class="w-7 h-7"></i>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-bold text-xl mb-1 font-serif">¡Pedido en Marcha!</h3>
+                    <p class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">
+                        Cierre automático en: <span class="text-[#B87352] font-mono text-sm ml-1">{{ formatTime(countdown) }}</span>
+                    </p>
+                </div>
+                <button @click="showOrderSuccess = false" aria-label="Cerrar notificación" class="text-gray-300 hover:text-gray-500 transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+
+        <div v-if="isCartOpen" class="fixed inset-0 bg-black/30 backdrop-blur-sm z-[100] transition-opacity" @click="isCartOpen = false" role="presentation"></div>
+        <aside :class="['cart-sidebar', isCartOpen ? 'open' : 'closed']" aria-modal="true" role="dialog" aria-label="Carrito de compras">
+            <div class="p-8 flex justify-between items-center border-b border-gray-200/50">
+                <div>
+                    <h2 class="text-3xl font-bold font-serif">Tu Carrito</h2>
+                    <p class="text-[10px] text-[#708D71] font-bold uppercase tracking-widest mt-1">Selección Orgánica</p>
+                </div>
+                <button @click="isCartOpen = false" aria-label="Cerrar carrito" class="text-gray-400 hover:text-black">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-8 space-y-6 no-scrollbar" aria-live="polite">
+                <div v-if="activeOrder.length > 0" class="mb-8 opacity-70">
+                    <h3 class="text-[10px] font-bold uppercase tracking-widest text-[#708D71] mb-4">Paquete Original (En preparación)</h3>
+                    <div class="space-y-4 border-l-2 border-[#708D71]/30 pl-4">
+                        <div v-for="item in activeOrder" :key="'orig-' + item.id" class="flex gap-4">
+                            <div class="cart-item-img">
+                                <img :src="item.img" class="w-full h-full object-cover grayscale" alt="" />
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-xs">{{ item.name }}</h4>
+                                <p class="text-[9px] uppercase tracking-tighter text-gray-500">Cant: {{ item.qty }} • S/ {{ (item.price * item.qty).toFixed(2) }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="cart.length === 0" class="h-full flex flex-col items-center justify-center italic opacity-30 text-gray-500 min-h-[150px]">
+                    <p>Cesta vacía por ahora...</p>
+                </div>
+
+                <div v-else v-for="item in cart" :key="item.id" class="flex gap-4 group">
+                    <div class="cart-item-img w-20 h-20">
+                        <img :src="item.img" class="w-full h-full object-cover" :alt="item.name" />
+                    </div>
+                    <div class="flex-1 flex flex-col justify-between">
+                        <div>
+                            <div class="flex justify-between items-start">
+                                <h4 class="font-bold text-sm pr-2">{{ item.name }}</h4>
+                                <button @click="removeFromCart(item.id)" :aria-label="'Eliminar ' + item.name + ' del carrito'" class="text-gray-300 hover:text-[#708D71] transition-colors mt-0.5 md:opacity-0 group-hover:opacity-100">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <p class="text-[10px] text-gray-400 uppercase tracking-tighter mb-2">{{ item.category }}</p>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="font-bold">S/ {{ (item.price * item.qty).toFixed(2) }}</span>
+                            <div class="flex items-center gap-3 bg-white px-2 py-1 rounded-lg border border-gray-100">
+                                <button @click="updateQty(item.id, -1)" aria-label="Disminuir cantidad"><i data-lucide="minus" class="w-3 h-3"></i></button>
+                                <span class="text-xs font-bold w-4 text-center">{{ item.qty }}</span>
+                                <button @click="updateQty(item.id, 1)" aria-label="Aumentar cantidad"><i data-lucide="plus" class="w-3 h-3"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-8 bg-white space-y-6">
+                <div class="space-y-3">
+                    <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Método de Entrega</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <button @click="deliveryMethod = 'recoger'" :class="['flex flex-col items-center gap-2 py-4 rounded-2xl border-2 transition-all', deliveryMethod === 'recoger' ? 'border-[#708D71] bg-[#708D71]/5 text-[#708D71]' : 'border-gray-100 text-gray-400']">
+                            <i data-lucide="store" class="w-5 h-5"></i>
+                            <span class="text-[10px] font-bold uppercase tracking-widest">Recoger</span>
+                        </button>
+                        <button @click="deliveryMethod = 'delivery'" :class="['flex flex-col items-center gap-2 py-4 rounded-2xl border-2 transition-all', deliveryMethod === 'delivery' ? 'border-[#708D71] bg-[#708D71]/5 text-[#708D71]' : 'border-gray-100 text-gray-400']">
+                            <i data-lucide="bike" class="w-5 h-5"></i>
+                            <span class="text-[10px] font-bold uppercase tracking-widest">Delivery</span>
+                        </button>
+                    </div>
+                </div>
+                <button @click="handleCheckout" :disabled="cart.length === 0" :class="['btn-checkout', activeOrder.length > 0 ? 'accent' : 'primary']">
+                    {{ activeOrder.length > 0 ? 'Pago con 1 clic' : 'Finalizar Compra' }}
+                </button>
+            </div>
+        </aside>
+
+        <header class="nav-header px-3 md:px-6">
+            <nav class="max-w-7xl mx-auto h-full flex items-center justify-between" aria-label="Navegación principal">
+                <div class="flex items-center gap-2 md:gap-6 flex-1 overflow-hidden">
+                    <button @click="view = 'tienda'" class="flex items-center gap-1 group focus:outline-none focus:ring-2 focus:ring-[#708D71] rounded-lg" aria-label="Ir al inicio, Esencia Urbana">
+                        <div class="text-[#5B7C5C]">
+                            <i data-lucide="leaf" class="w-5 h-5 fill-current"></i>
+                        </div>
+                        <h1 class="text-lg font-bold italic tracking-tight hidden sm:block font-serif">Esencia Urbana</h1>
+                    </button>
+                    
+                    <div class="flex gap-2 sm:gap-4 md:gap-6 border-l border-gray-200 ml-2 md:ml-4 pl-2 md:pl-6 overflow-x-auto no-scrollbar">
+                        <button v-for="item in ['tienda', 'ofertas', 'cuenta', 'ajustes']" :key="item" @click="view = item" :class="['nav-link text-[9px] sm:text-[11px] md:text-[12px]', view === item ? 'active' : '']">
+                            {{ item }}
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <button v-if="isDictationEnabled" @click="handleListen" :class="['p-2 rounded-full transition-colors', isListening ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-gray-200']" aria-label="Buscar por voz">
+                        <i data-lucide="mic" class="w-5 h-5"></i>
+                    </button>
+
+                    <button @click="isSearchOpen = !isSearchOpen" class="md:hidden p-2 text-gray-500" aria-label="Abrir buscador">
+                        <i data-lucide="search" class="w-5 h-5"></i>
+                    </button>
+                    
+                    <div class="relative hidden md:block">
+                        <div class="relative">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"></i>
+                            <input type="text" v-model="searchQuery" placeholder="Buscar productos..." class="pl-9 pr-4 py-2 bg-white rounded-full border border-gray-200 text-[10px] w-48 focus:outline-none focus:ring-1 focus:ring-[#708D71]" />
+                        </div>
+                    </div>
+
+                    <button @click="isCartOpen = true" :aria-label="'Ver carrito, ' + cart.length + ' productos'" class="relative flex items-center p-1">
+                        <i data-lucide="shopping-bag" class="w-5 h-5" stroke-width="1.5"></i>
+                        <span class="absolute -top-1 -right-2 bg-[#B87352] text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">{{ cart.length }}</span>
+                    </button>
+                </div>
+            </nav>
+            
+            <div v-if="isSearchOpen" class="md:hidden px-4 pb-4 animate-fade-in border-t border-gray-200 pt-4 bg-[#F5F4F0]">
+                <div class="relative w-full">
+                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"></i>
+                    <input type="text" v-model="searchQuery" autofocus placeholder="Buscar productos..." class="w-full pl-9 pr-4 py-2 bg-white rounded-full border border-gray-200 text-[10px] focus:outline-none focus:ring-1 focus:ring-[#708D71]" />
+                </div>
+            </div>
+        </header>
+
+        <main class="animate-fade-in">
+            <section v-if="view === 'cuenta'" class="max-w-5xl mx-auto py-12 px-6 animate-fade-in" aria-labelledby="profile-heading">
+                <h2 id="profile-heading" class="sr-only">Perfil de Usuario</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="md:col-span-2 bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100 flex flex-col justify-between">
+                        <div class="flex flex-col sm:flex-row items-center gap-8 mb-12">
+                            <div class="w-32 h-32 rounded-full bg-[#708D71] flex items-center justify-center text-white text-4xl font-bold border-4 border-white" aria-hidden="true">
+                                CR
+                            </div>
+                            <div class="text-center sm:text-left">
+                                <h3 class="text-4xl font-bold text-[#2A2A2A] mb-1 font-serif">Carlos Rodríguez</h3>
+                                <p class="text-gray-400 text-sm mb-4">carlos.rodriguez@email.com</p>
+                                <div class="flex gap-3 justify-center sm:justify-start">
+                                    <span class="px-4 py-1.5 bg-[#F5F4F0] rounded-full text-[10px] font-bold uppercase tracking-widest text-[#708D71]">Cliente Gold</span>
+                                    <span class="px-4 py-1.5 bg-[#F5F4F0] rounded-full text-[10px] font-bold uppercase tracking-widest text-gray-500">12 Pedidos</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-8 border-t border-gray-100 pt-8">
+                            <div class="space-y-2">
+                                <p class="text-[10px] font-bold text-[#708D71] uppercase tracking-widest">Dirección</p>
+                                <p class="text-sm font-medium">Av. Larco 456, Miraflores</p>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-[10px] font-bold text-[#708D71] uppercase tracking-widest">Teléfono</p>
+                                <p class="text-sm font-medium">+51 987 654 321</p>
+                            </div>
+                        </div>
+                        <button class="mt-12 text-[#B87352] text-[10px] font-bold uppercase tracking-widest border-b border-[#B87352] w-fit hover:opacity-70 transition-opacity">
+                            Editar Perfil
+                        </button>
+                    </div>
+
+                    <div class="space-y-8">
+                        <div class="bg-[#708D71] rounded-[2.5rem] p-10 text-white shadow-xl shadow-[#708D71]/20 relative overflow-hidden">
+                            <p class="text-[10px] font-bold uppercase tracking-[0.2em] mb-4 opacity-80">Mis Puntos</p>
+                            <h3 class="text-6xl font-bold mb-8 font-serif">2,450</h3>
+                            <button class="w-full bg-white/20 hover:bg-white/30 backdrop-blur-md py-4 rounded-2xl font-bold uppercase text-[10px] tracking-widest transition-all">
+                                Canjear
+                            </button>
+                        </div>
+                        <div class="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100">
+                            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-8">Menú de Usuario</p>
+                            <div class="space-y-6">
+                                <button class="flex items-center gap-4 w-full text-sm font-medium hover:text-[#708D71] transition-colors group">
+                                    <i data-lucide="history" class="w-4 h-4 text-gray-400 group-hover:text-[#708D71]"></i>
+                                    Historial
+                                </button>
+                                <button class="flex items-center gap-4 w-full text-sm font-medium text-[#B87352] hover:opacity-70 transition-opacity group">
+                                    <i data-lucide="log-out" class="w-4 h-4"></i>
+                                    Cerrar Sesión
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section v-else-if="view === 'ajustes'" class="max-w-5xl mx-auto py-12 px-6 animate-fade-in" aria-labelledby="settings-heading">
+                <h2 id="settings-heading" class="text-4xl font-bold text-[#2A2A2A] mb-8 font-serif">Ajustes de Accesibilidad</h2>
+                <div class="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100 mb-8">
+                    <div class="space-y-8">
+                        <div class="flex items-center justify-between p-6 bg-[#F5F4F0] rounded-2xl">
+                            <div>
+                                <h3 class="font-bold text-lg mb-1 flex items-center gap-2">
+                                    <i data-lucide="volume-2" class="text-[#708D71] w-5 h-5"></i>
+                                    Lector de Productos
+                                </h3>
+                                <p class="text-sm text-gray-500">Lee en voz alta el nombre del producto al seleccionarlo.</p>
+                            </div>
+                            <button @click="isVoiceReaderEnabled = !isVoiceReaderEnabled" :aria-pressed="isVoiceReaderEnabled" aria-label="Alternar lector de voz" :class="['w-14 h-8 flex items-center rounded-full p-1 transition-colors', isVoiceReaderEnabled ? 'bg-[#708D71]' : 'bg-gray-300']">
+                                <div :class="['bg-white w-6 h-6 rounded-full shadow-md transform transition-transform', isVoiceReaderEnabled ? 'translate-x-6' : 'translate-x-0']" />
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between p-6 bg-[#F5F4F0] rounded-2xl">
+                            <div>
+                                <h3 class="font-bold text-lg mb-1 flex items-center gap-2">
+                                    <i data-lucide="mic" class="text-[#708D71] w-5 h-5"></i>
+                                    Dictado de Voz
+                                </h3>
+                                <p class="text-sm text-gray-500">Añade un botón de micrófono en la cabecera para buscar por voz.</p>
+                            </div>
+                            <button @click="isVoiceReaderEnabled = false; isDictationEnabled = !isDictationEnabled" :aria-pressed="isDictationEnabled" aria-label="Alternar dictado de voz" :class="['w-14 h-8 flex items-center rounded-full p-1 transition-colors', isDictationEnabled ? 'bg-[#708D71]' : 'bg-gray-300']">
+                                <div :class="['bg-white w-6 h-6 rounded-full shadow-md transform transition-transform', isDictationEnabled ? 'translate-x-6' : 'translate-x-0']" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <template v-else>
+                <section class="max-w-7xl mx-auto px-6 py-12">
+                    <div class="bg-white rounded-[3rem] p-12 md:p-20 flex flex-col md:flex-row items-center gap-16 shadow-sm overflow-hidden">
+                        <div class="flex-1 space-y-8">
+                            <h2 class="text-5xl md:text-8xl font-bold leading-[0.9] font-serif">
+                                {{ view === 'ofertas' ? 'Ofertas del ' : 'Lo esencial, ' }} <br /> 
+                                <span class="text-[#708D71]">{{ view === 'ofertas' ? 'Mes.' : 'siempre a tu alcance.' }}</span>
+                            </h2>
+                            <button @click="activeCategory = 'TODOS'" class="bg-[#2A2A2A] text-white px-10 py-5 rounded-full font-bold uppercase text-[10px] tracking-widest shadow-xl hover:scale-105 transition-transform">
+                                Ver todo el catálogo
+                            </button>
+                        </div>
+                        <div class="flex-1" aria-hidden="true">
+                            <div class="w-full aspect-square rounded-[3rem] overflow-hidden rotate-3 shadow-2xl border-[12px] border-white">
+                                <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=800" class="w-full h-full object-cover" alt="" />
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="max-w-7xl mx-auto px-6 py-6" aria-labelledby="products-heading">
+                    <h2 id="products-heading" class="sr-only">Catálogo de Productos</h2>
+                    <div class="flex gap-4 mb-16 overflow-x-auto no-scrollbar py-2">
+                        <button v-for="cat in categories" :key="cat" @click="activeCategory = cat" :aria-pressed="activeCategory === cat" :class="['btn-category', activeCategory === cat ? 'active' : 'inactive']">
+                            {{ cat }}
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                        <article v-for="product in filteredProducts" :key="product.id" @mouseenter="speakProduct(product.name)" class="product-card">
+                            <div class="product-image-wrapper">
+                                <img :src="product.img" class="w-full h-full object-cover" :alt="product.name" />
+                                <div v-if="product.offer" class="product-badge-offer">Oferta</div>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-[9px] font-bold text-[#708D71] uppercase tracking-widest">{{ product.category }}</p>
+                                <h3 class="font-bold text-lg leading-tight font-serif">{{ product.name }}</h3>
+                                <div class="flex justify-between items-center pt-4">
+                                    <div class="flex flex-col">
+                                        <span class="text-xl font-bold">S/ {{ product.price.toFixed(2) }}</span>
+                                        <span v-if="product.oldPrice" class="text-[10px] text-gray-300 line-through">S/ {{ product.oldPrice.toFixed(2) }}</span>
+                                    </div>
+                                    <button @click="addToCart(product)" :aria-label="'Agregar ' + product.name + ' al carrito'" class="btn-add-cart">
+                                        <i data-lucide="plus" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+            </template>
+        </main>
+
+        <footer class="py-20 border-t border-gray-200 mt-20 bg-white" role="contentinfo">
+            <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-10">
+                <button @click="view = 'tienda'" class="flex items-center gap-1 group focus:outline-none" aria-label="Ir al inicio, Esencia Urbana">
+                    <div class="text-[#5B7C5C]">
+                        <i data-lucide="leaf" class="w-5 h-5 fill-current"></i>
+                    </div>
+                    <h1 class="text-lg font-bold italic tracking-tight font-serif">Esencia Urbana</h1>
+                </button>
+                <div class="flex gap-12 text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                    <span class="hover:text-[#708D71] cursor-pointer" tabindex="0">Instagram</span>
+                    <span class="hover:text-[#708D71] cursor-pointer" tabindex="0">WhatsApp</span>
+                    <span class="hover:text-[#708D71] cursor-pointer" tabindex="0">Sedes</span>
+                </div>
+            </div>
+        </footer>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
