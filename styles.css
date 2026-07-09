@@ -1,0 +1,902 @@
+@import url('https://fonts.googleapis.com/css2?family=Inclusive+Sans:ital,wght@0,300..400;1,300..400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
+
+/* ==========================================================================
+   VARIABLES GLOBALES (Paleta Refinada)
+   ========================================================================== */
+:root {
+    --primary-color: #5B8266; /* Verde más fresco y moderno */
+    --primary-hover: #4A6B53;
+    --accent-color: #D47B57; /* Terracota cálido */
+    --bg-color: #F8F7F4; /* Blanco hueso más limpio */
+    --surface-white: #ffffff;
+    --text-color: #2D312E; /* Gris oscuro en lugar de negro puro */
+    --font-scale: 1; /* Controlado desde Ajustes > Tamaño de texto */
+}
+
+html {
+    font-size: calc(16px * var(--font-scale));
+}
+
+body { 
+    font-family: 'Inclusive Sans', sans-serif; 
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    overflow-x: hidden;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+::selection {
+    background-color: var(--primary-color);
+    color: #ffffff;
+}
+
+.font-serif { 
+    font-family: 'Playfair Display', serif; 
+}
+
+/* ==========================================================================
+   UTILIDADES PERSONALIZADAS
+   ========================================================================== */
+.text-success { color: var(--primary-color) !important; }
+.bg-success { background-color: var(--primary-color) !important; }
+.btn-success { background-color: var(--primary-color) !important; border-color: var(--primary-color) !important; }
+.btn-success:hover { background-color: var(--primary-hover) !important; border-color: var(--primary-hover) !important; }
+.border-success { border-color: var(--primary-color) !important; }
+.bg-success-light { background-color: rgba(91, 130, 102, 0.1) !important; }
+.bg-warning-light { background-color: rgba(217, 164, 65, 0.15) !important; }
+.text-warning { color: #b3791a !important; }
+.border-warning { border-color: #d9a441 !important; }
+.text-accent { color: var(--accent-color) !important; }
+.bg-accent { background-color: var(--accent-color) !important; }
+
+/* Ocultar barras de scroll */
+.custom-scrollbar::-webkit-scrollbar { display: none; }
+.custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.z-index-toast { z-index: 2000; }
+
+/* ==========================================================================
+   AVISOS FLOTANTES DE PEDIDOS (esquina superior derecha)
+   Se agrupan en una esquina, no en el centro de la pantalla, para no tapar
+   el encabezado ni el contenido de la tienda. El contenedor no captura
+   clics (pointer-events: none); solo cada tarjeta individual sí, para que
+   se puedan cerrar con su botón X sin bloquear nada debajo.
+   ========================================================================== */
+.order-toast-stack {
+    position: fixed;
+    top: 90px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+    z-index: 2000;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+    overflow-x: visible;
+    pointer-events: none;
+}
+.order-toast-stack::-webkit-scrollbar { display: none; }
+.order-toast-stack { -ms-overflow-style: none; scrollbar-width: none; }
+
+.order-toast-card {
+    max-width: 380px;
+    pointer-events: auto;
+}
+
+@media (max-width: 576px) {
+    .order-toast-stack {
+        top: 76px;
+        right: 12px;
+        left: 12px;
+        align-items: stretch;
+    }
+    .order-toast-card {
+        max-width: none;
+    }
+}
+
+/* ==========================================================================
+   ANIMACIONES Y EFECTOS
+   ========================================================================== */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modalIn {
+    from { opacity: 0; transform: translate(-50%, -45%) scale(0.95); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes barGrow {
+    from { width: 0 !important; }
+    to { /* width definido por estilo inline */ }
+}
+
+.animate-fade-in { animation: fadeIn 0.4s ease forwards; }
+.transform-rotate { transform: rotate(3deg); }
+
+/* ==========================================================================
+   COMPONENTES BASE
+   ========================================================================== */
+.product-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.product-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.08) !important;
+}
+
+.btn-add-custom {
+    background-color: #F0EFEA;
+    color: var(--text-color);
+    transition: all 0.3s;
+    border: none;
+}
+.btn-add-custom:hover {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+}
+
+/* ==========================================================================
+   CARRITO Y MODAL DE PAGO
+   ========================================================================== */
+.cart-overlay, .modal-backdrop-custom {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(45, 49, 46, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1040;
+}
+
+.cart-sidebar {
+    position: fixed;
+    top: 0; bottom: 0; right: 0;
+    width: 100%;
+    max-width: 420px;
+    background-color: #fff;
+    z-index: 1050;
+    box-shadow: -5px 0 25px rgba(0,0,0,0.15);
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+.cart-sidebar.open { transform: translateX(0); }
+.cart-sidebar.closed { transform: translateX(100%); }
+
+/* ==========================================================================
+   CARRITO FIJO AL LADO (pantallas de escritorio/tablet)
+   En vez de tapar la tienda como un modal, el carrito reserva su propio
+   espacio a la derecha y el contenido se acomoda al lado. En celular no hay
+   espacio para eso: se mantiene como panel deslizante de ancho completo
+   (ver media query más abajo).
+   ========================================================================== */
+@media (min-width: 992px) {
+    body.cart-open {
+        padding-right: 420px;
+        transition: padding-right 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    /* Mientras el carrito está fijo al lado no hace falta oscurecer la tienda */
+    body.cart-open .cart-overlay {
+        background: transparent;
+        backdrop-filter: none;
+        pointer-events: none;
+    }
+    .cart-sidebar {
+        box-shadow: -2px 0 12px rgba(0,0,0,0.06);
+        border-left: 1px solid rgba(0,0,0,0.06);
+    }
+    /* El carrito fijo queda por encima del botón/panel de soporte; se corren
+       hacia la izquierda para que no queden tapados mientras el carrito está visible. */
+    body.cart-open .support-fab { right: 444px; }
+    body.cart-open .support-panel { right: 444px; }
+    body.cart-open .reopen-orders-fab { right: 444px; }
+}
+
+.reopen-orders-fab { right: 24px; }
+
+.cart-item-img {
+    width: 70px; height: 70px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+}
+
+.btn-checkout {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 16px;
+    border-radius: 14px;
+    border: none;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    transition: background-color 0.3s ease;
+}
+.btn-checkout:disabled { background-color: #ccc; cursor: not-allowed; }
+.btn-checkout:not(:disabled):hover { background-color: var(--primary-hover); }
+.btn-checkout.accent { background-color: var(--accent-color); }
+.btn-checkout.accent:hover { background-color: #BA6645; }
+.btn-checkout.outline-variant {
+    background-color: transparent;
+    color: var(--accent-color);
+    border: 2px solid var(--accent-color);
+}
+.btn-checkout.outline-variant:disabled { background-color: transparent; color: #ccc; border-color: #ccc; }
+.btn-checkout.outline-variant:not(:disabled):hover { background-color: var(--accent-color); color: white; }
+
+/* Modal de Pago */
+.payment-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%; max-width: 550px;
+    background: #fff;
+    border-radius: 24px;
+    z-index: 1050;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.payment-method-box {
+    border: 2px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.payment-method-box.selected {
+    border-color: var(--primary-color);
+    background-color: rgba(91, 130, 102, 0.05);
+}
+
+/* ==========================================================================
+   ESTADO DE STOCK
+   ========================================================================== */
+.badge-stock-low {
+    background-color: #E8A33D;
+    color: #fff;
+}
+
+.badge-stock-out {
+    background-color: #B23A3A;
+    color: #fff;
+}
+
+.product-card.is-out-of-stock {
+    opacity: 0.55;
+}
+
+.product-card.is-out-of-stock img {
+    filter: grayscale(60%);
+}
+
+.btn-add-custom:disabled,
+.btn-add-custom.disabled {
+    background-color: #E5E3DB !important;
+    color: #9A9890 !important;
+    cursor: not-allowed;
+}
+.btn-add-custom:disabled:hover,
+.btn-add-custom.disabled:hover {
+    background-color: #E5E3DB !important;
+    color: #9A9890 !important;
+}
+
+/* ==========================================================================
+   COMPRAS FRECUENTES
+   ========================================================================== */
+.frequent-scroll {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+}
+
+.frequent-card {
+    flex: 0 0 200px;
+    background: var(--surface-white);
+    border-radius: 20px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    padding: 14px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.frequent-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 18px rgba(0,0,0,0.08);
+}
+
+.frequent-card img {
+    width: 100%;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 14px;
+}
+
+.frequent-badge-count {
+    background-color: rgba(91, 130, 102, 0.1);
+    color: var(--primary-color);
+    font-weight: bold;
+    font-size: calc(10px * var(--font-scale));
+    letter-spacing: 0.5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+}
+
+/* ==========================================================================
+   RESEÑAS DE PRODUCTOS
+   ========================================================================== */
+.rating-stars {
+    color: #E8A33D;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.btn-reviews-link {
+    color: var(--text-color);
+    opacity: 0.65;
+    font-size: calc(11px * var(--font-scale));
+    text-decoration: underline;
+    background: none;
+    border: none;
+    padding: 0;
+}
+.btn-reviews-link:hover { color: var(--primary-color); opacity: 1; }
+
+.reviews-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%; max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 24px;
+    z-index: 1050;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.review-item {
+    border-bottom: 1px solid #EFEEEA;
+    padding: 14px 0;
+}
+.review-item:last-child { border-bottom: none; }
+
+/* ==========================================================================
+   HISTORIAL DE COMPRAS
+   ========================================================================== */
+.history-order-card {
+    background: var(--surface-white);
+    border-radius: 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    padding: 18px;
+}
+
+.history-item-thumb {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #f8f9fa;
+    border: 1px solid #eee;
+}
+
+/* ==========================================================================
+   MANEJO DE ERRORES DE PAGO
+   ========================================================================== */
+.error-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%; max-width: 460px;
+    background: #fff;
+    border-radius: 24px;
+    z-index: 1060;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    text-align: center;
+}
+
+.error-icon-wrap {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: rgba(232, 163, 61, 0.12);
+    color: #E8A33D;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+
+.error-status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #F8F7F4;
+    border-radius: 14px;
+    padding: 12px 16px;
+    font-size: calc(12.5px * var(--font-scale));
+}
+
+/* ==========================================================================
+   MODAL DE CONFIRMACIÓN (editar/cancelar pedido en marcha)
+   ========================================================================== */
+.confirm-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%; max-width: 420px;
+    background: #fff;
+    border-radius: 24px;
+    z-index: 1070;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    text-align: center;
+}
+
+.confirm-icon-wrap {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: rgba(212, 123, 87, 0.12);
+    color: var(--accent-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+}
+.confirm-icon-wrap.danger {
+    background: rgba(220, 53, 69, 0.12);
+    color: #dc3545;
+}
+
+/* ==========================================================================
+   NOTAS DE PAGO CON 1 CLIC (pedido en marcha)
+   ========================================================================== */
+.one-click-note {
+    background: linear-gradient(135deg, rgba(212, 123, 87, 0.1), rgba(212, 123, 87, 0.04));
+    border: 1px solid rgba(212, 123, 87, 0.3);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: calc(12px * var(--font-scale));
+    color: var(--text-color);
+}
+.one-click-note i { color: var(--accent-color); }
+
+.one-click-empty-note {
+    background: var(--bg-color);
+    border: 1px dashed #d8d5cd;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+    font-size: calc(12px * var(--font-scale));
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.one-click-empty-note i { color: var(--primary-color); flex-shrink: 0; }
+
+/* ==========================================================================
+   PANEL DE SOPORTE
+   ========================================================================== */
+.support-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background-color: var(--primary-color);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+    z-index: 1030;
+    border: none;
+    transition: transform 0.2s ease;
+}
+.support-fab:hover { transform: scale(1.08); background-color: var(--primary-hover); }
+
+.support-panel {
+    position: fixed;
+    bottom: 90px;
+    right: 24px;
+    width: 320px;
+    max-width: 90vw;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 15px 35px rgba(0,0,0,0.18);
+    z-index: 1031;
+    animation: modalIn 0.25s ease forwards;
+    transform-origin: bottom right;
+}
+
+/* ==========================================================================
+   PUNTOS DE FIDELIDAD
+   ========================================================================== */
+.discount-banner {
+    background-color: rgba(91, 130, 102, 0.1);
+    border: 1px dashed var(--primary-color);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: calc(12px * var(--font-scale));
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+/* ==========================================================================
+   BANNER DE AHORRO (COMPARACIÓN DE PRECIOS)
+   ========================================================================== */
+.savings-banner {
+    background: linear-gradient(135deg, rgba(91, 130, 102, 0.08), rgba(91, 130, 102, 0.04));
+    border: 1px solid rgba(91, 130, 102, 0.25);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: calc(12px * var(--font-scale));
+    color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ==========================================================================
+   MODAL DE COMPARACIÓN DE PRECIOS
+   ========================================================================== */
+.compare-modal {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%; max-width: 580px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 24px;
+    z-index: 1050;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Pastilla de ahorro potencial */
+.compare-saving-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(91, 130, 102, 0.1);
+    color: var(--primary-color);
+    border: 1px solid rgba(91, 130, 102, 0.3);
+    border-radius: 50px;
+    padding: 6px 16px;
+    font-size: calc(12px * var(--font-scale));
+    font-weight: 700;
+}
+
+/* Caja de puesto seleccionable */
+.puesto-option-box {
+    border: 2px solid #E5E7EB;
+    border-radius: 16px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: block;
+    position: relative;
+    background: #FAFAF9;
+}
+.puesto-option-box:hover {
+    border-color: #B8CFC0;
+    background: #F8F7F4;
+}
+.puesto-option-box.selected {
+    border-color: var(--primary-color);
+    background: rgba(91, 130, 102, 0.04);
+    box-shadow: 0 0 0 3px rgba(91, 130, 102, 0.12);
+}
+.puesto-option-box.cheapest {
+    background: rgba(91, 130, 102, 0.03);
+}
+.puesto-option-box.out-of-stock {
+    opacity: 0.55;
+    cursor: not-allowed;
+    background: #F3F3F1;
+}
+.puesto-option-box.out-of-stock:hover {
+    border-color: #E5E7EB;
+    background: #F3F3F1;
+}
+
+/* Etiqueta "Mejor precio" */
+.best-price-tag {
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    background: var(--primary-color);
+    color: #fff;
+    font-size: calc(9px * var(--font-scale));
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    text-transform: uppercase;
+}
+
+/* Barra visual de precio relativo */
+.price-bar-track {
+    width: 100%;
+    height: 4px;
+    background: #EFEEEA;
+    border-radius: 99px;
+    overflow: hidden;
+}
+.price-bar-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: barGrow 0.7s ease forwards;
+}
+.price-bar-fill.cheapest-bar { background: var(--primary-color); }
+.price-bar-fill.expensive-bar { background: #E8A33D; }
+
+/* Enlace de comparación en la tarjeta de producto */
+.compare-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: calc(10px * var(--font-scale));
+    font-weight: 700;
+    color: var(--primary-color);
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    letter-spacing: 0.3px;
+}
+.compare-link:hover { opacity: 0.7; }
+
+/* ==========================================================================
+   TABLA DE COMPARACIÓN DE PRECIOS (VISTA DEDICADA)
+   ========================================================================== */
+.compare-table-wrapper {
+    background: #fff;
+}
+
+.compare-table-header {
+    background: #F8F7F4;
+    border-bottom: 1px solid #EFEEEA;
+    min-height: 48px;
+}
+
+.compare-table-row {
+    border-bottom: 1px solid #F3F2EF;
+    min-height: 72px;
+    transition: background 0.15s ease;
+}
+.compare-table-row:hover { background: rgba(91, 130, 102, 0.03) !important; }
+.compare-table-row:last-child { border-bottom: none; }
+
+.compare-row-alt { background: #FAFAF8; }
+
+.compare-product-thumb {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    object-fit: cover;
+    border: 1px solid #EFEEEA;
+    flex-shrink: 0;
+}
+
+.compare-price-cell {
+    font-size: calc(14px * var(--font-scale));
+    display: block;
+}
+
+.best-price-cell {
+    color: var(--primary-color);
+    background: rgba(91, 130, 102, 0.1);
+    border-radius: 8px;
+    padding: 2px 8px;
+    display: inline-block;
+}
+
+/* ==========================================================================
+   RESPONSIVE
+   ========================================================================== */
+@media (max-width: 768px) {
+    .compare-table-header,
+    .compare-table-row {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .compare-table-header > div,
+    .compare-table-row > div {
+        flex: 1 !important;
+        text-align: left !important;
+    }
+    .compare-modal {
+        width: 95%;
+        max-height: 85vh;
+    }
+}
+
+/* ==========================================================================
+   MODO OSCURO
+   ========================================================================== */
+body.dark-mode {
+    --primary-color: #7FAF8C;
+    --primary-hover: #93C09E;
+    --accent-color: #E39A78;
+    --bg-color: #14171A;
+    --surface-white: #1E2320;
+    --text-color: #EDEBE6;
+}
+
+/* Fondos y superficies genéricas de Bootstrap usadas en el markup */
+body.dark-mode .bg-white,
+body.dark-mode .card,
+body.dark-mode .compare-table-wrapper,
+body.dark-mode .compare-table-header,
+body.dark-mode .compare-row-alt,
+body.dark-mode .cart-sidebar,
+body.dark-mode .payment-modal,
+body.dark-mode .reviews-modal,
+body.dark-mode .error-modal,
+body.dark-mode .compare-modal,
+body.dark-mode .confirm-modal,
+body.dark-mode .support-panel {
+    background-color: var(--surface-white) !important;
+    color: var(--text-color);
+}
+
+body.dark-mode .one-click-empty-note {
+    background: #1A1F1B;
+    border-color: #33372F;
+}
+
+body.dark-mode .text-dark,
+body.dark-mode h1, body.dark-mode h2, body.dark-mode h3,
+body.dark-mode h4, body.dark-mode h5, body.dark-mode h6 {
+    color: var(--text-color) !important;
+}
+
+body.dark-mode .text-muted {
+    color: #A6A39C !important;
+}
+
+body.dark-mode .border,
+body.dark-mode .border-top,
+body.dark-mode .border-bottom {
+    border-color: #33372F !important;
+}
+
+body.dark-mode .bg-light {
+    background-color: #262B27 !important;
+}
+
+body.dark-mode .shadow-sm,
+body.dark-mode .shadow-lg {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+body.dark-mode .modal-backdrop-custom {
+    background: rgba(0, 0, 0, 0.7);
+}
+
+body.dark-mode .btn-close {
+    filter: invert(1) grayscale(100%) brightness(1.6);
+}
+
+/* Formularios */
+body.dark-mode .form-control,
+body.dark-mode textarea.form-control,
+body.dark-mode input.form-control {
+    background-color: #262B27;
+    color: var(--text-color);
+    border-color: #3A3F38;
+}
+body.dark-mode .form-control::placeholder {
+    color: #8A8780;
+}
+body.dark-mode .form-control:focus {
+    background-color: #262B27;
+    color: var(--text-color);
+}
+
+/* Botones y filtros de categoría */
+body.dark-mode .btn-add-custom {
+    background-color: #2A2F2A;
+    color: var(--text-color);
+}
+body.dark-mode .btn-reviews-link {
+    color: var(--text-color);
+}
+
+/* Tarjetas de producto y compras frecuentes */
+body.dark-mode .frequent-card,
+body.dark-mode .product-card {
+    background-color: var(--surface-white);
+}
+body.dark-mode .cart-item-img {
+    background: #262B27;
+    border-color: #3A3F38;
+}
+
+/* Comparador de precios y puestos */
+body.dark-mode .puesto-option-box {
+    background: #1A1F1B;
+    border-color: #33372F;
+}
+body.dark-mode .puesto-option-box:hover {
+    background: #21261F;
+    border-color: #4A6B53;
+}
+body.dark-mode .puesto-option-box.out-of-stock,
+body.dark-mode .puesto-option-box.out-of-stock:hover {
+    background: #1A1D1A;
+    border-color: #2A2E29;
+}
+body.dark-mode .payment-method-box {
+    background: transparent;
+    border-color: #33372F;
+}
+body.dark-mode .compare-table-header {
+    border-bottom-color: #33372F;
+}
+body.dark-mode .compare-table-row {
+    border-bottom-color: #262B27;
+}
+body.dark-mode .compare-table-row:hover {
+    background: rgba(127, 175, 140, 0.08) !important;
+}
+body.dark-mode .compare-product-thumb {
+    border-color: #33372F;
+}
+body.dark-mode .price-bar-track {
+    background: #2A2F2A;
+}
+body.dark-mode .review-item {
+    border-bottom-color: #2A2F2A;
+}
+body.dark-mode .error-status-row {
+    background: #262B27;
+}
+
+/* Badges de stock, mantenemos contraste de color ya que llevan fondo propio */
+body.dark-mode .badge-stock-low,
+body.dark-mode .badge-stock-out {
+    color: #fff;
+}
+
+/* Íconos de Lucide heredan color currentColor, se ajustan solos */
+
+/* ==========================================================================
+   DICTADO POR VOZ (ACCESIBILIDAD)
+   ========================================================================== */
+@keyframes micPulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    70% { transform: scale(1.9); opacity: 0; }
+    100% { transform: scale(1.9); opacity: 0; }
+}
+.mic-pulse-ring {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 20px; height: 20px;
+    margin-top: -10px; margin-left: -10px;
+    border-radius: 50%;
+    border: 2px solid var(--accent-color);
+    animation: micPulse 1.4s ease-out infinite;
+    pointer-events: none;
+}
+
+.voice-feedback-bar {
+    background: rgba(91, 130, 102, 0.08);
+    border-bottom: 1px solid rgba(91, 130, 102, 0.2);
+    color: var(--text-color);
+}
+body.dark-mode .voice-feedback-bar {
+    background: rgba(127, 175, 140, 0.12);
+    border-bottom-color: rgba(127, 175, 140, 0.25);
+}

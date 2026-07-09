@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Esencia Urbana - Mercados Locales</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inclusive+Sans:ital,wght@0,300..400;1,300..400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+    <div id="app" v-cloak>
+        
+        <!-- ============================================================ -->
+        <!-- VENTANITAS DE PEDIDOS EN CURSO                                -->
+        <!-- Una tarjeta flotante por cada pedido en espera de pago (con    -->
+        <!-- opción de "terminar sin tiempo extra"). Se agrupan en una      -->
+        <!-- esquina (no en el centro superior) para no tapar el          -->
+        <!-- contenido de la tienda que queda debajo. Cerrarlas con la X   -->
+        <!-- solo las oculta: el contador de fondo sigue corriendo igual;  -->
+        <!-- se pueden volver a abrir con el botón flotante "Pedidos en    -->
+        <!-- curso" que aparece mientras estén ocultas.                    -->
+        <!-- ============================================================ -->
+        <div class="order-toast-stack" style="pointer-events: none;">
+            <div v-for="order in pendingOrders" :key="'wait-' + order.id" v-show="!order.widgetDismissed"
+                 class="bg-white rounded-4 shadow-lg p-4 d-flex align-items-center gap-3 animate-fade-in border w-100 order-toast-card">
+                <div :class="['p-3 rounded-4', order.readyForPayment ? 'bg-success-light text-success' : 'bg-warning-light text-warning']">
+                    <i :data-lucide="order.readyForPayment ? 'credit-card' : 'hourglass'" class="w-7 h-7"></i>
+                </div>
+                <div class="flex-grow-1">
+                    <h3 class="fw-bold fs-5 mb-1 font-serif">{{ order.readyForPayment ? '¡Listo para pagar!' : 'Confirmando tu pedido' }}</h3>
+                    <p v-if="!order.readyForPayment" class="small text-muted text-uppercase fw-bold mb-0">
+                        Opciones de pago en: <span class="text-accent font-monospace fs-6 ms-1">{{ formatTime(order.countdown) }}</span>
+                    </p>
+                    <p v-else class="small text-muted mb-0">Tus opciones de pago ya están disponibles.</p>
+                    <div class="d-flex gap-3 mt-2 flex-wrap">
+                        <button v-if="!order.readyForPayment" @click="finishWaitNow(order.id)"
+                                @mouseenter="announce('Terminar compra sin tiempo extra, ver opciones de pago ahora')" @focus="announce('Terminar compra sin tiempo extra, ver opciones de pago ahora')"
+                                class="btn btn-link text-accent fw-bold text-uppercase p-0" style="font-size: calc(10.5px * var(--font-scale)); letter-spacing: 1px;">Terminar Compra sin Tiempo Extra</button>
+                        <button v-else @click="openPaymentModalForOrder(order.id)"
+                                class="btn btn-link text-success fw-bold text-uppercase p-0" style="font-size: calc(10.5px * var(--font-scale)); letter-spacing: 1px;">Ver Opciones de Pago</button>
+                        <button v-if="!order.readyForPayment" @click="view = 'cuenta'; order.widgetDismissed = true"
+                                @mouseenter="announce('Editar o cancelar este pedido')" @focus="announce('Editar o cancelar este pedido')"
+                                class="btn btn-link text-muted fw-bold text-uppercase p-0" style="font-size: calc(10.5px * var(--font-scale)); letter-spacing: 1px;">Editar / Cancelar</button>
+                    </div>
+                    <p v-if="!order.readyForPayment" class="small text-muted fst-italic mb-0 mt-2">Puedes seguir viendo la tienda; puedes editar cantidades o cancelar este pedido desde "Mis Pedidos".</p>
+                </div>
+                <button @click="order.widgetDismissed = true" class="btn-close" aria-label="Ocultar aviso"></button>
+            </div>
+        </div>
+
+        <!-- Botón flotante para reabrir ventanitas de pedidos que el usuario cerró -->
+        <button v-if="hasDismissedOrderWidgets" @click="reopenDismissedOrderWidgets"
+                @mouseenter="announce('Ver pedidos en curso')" @focus="announce('Ver pedidos en curso')"
+                class="btn bg-accent text-white rounded-pill shadow-lg fw-bold text-uppercase d-flex align-items-center gap-2 position-fixed z-index-toast border-0 reopen-orders-fab"
+                style="bottom: 100px; font-size: calc(10.5px * var(--font-scale)); letter-spacing: 1px; padding: 10px 18px;">
+            <i data-lucide="clock" style="width: 15px;"></i> Pedidos en Curso
+        </button>
+
+        <!-- ============================================================ -->
+        <!-- NOTIFICACIÓN DE PEDIDO COMPLETADO                            -->
+        <!-- Aparece apenas se confirma el pago (sin pasar por ningún otro -->
+        <!-- contador) y se puede cerrar de inmediato con la X.            -->
+        <!-- ============================================================ -->
+        <div v-if="showOrderCompleted" class="order-toast-stack" style="pointer-events: none;">
+            <div class="bg-white rounded-4 shadow-lg p-4 d-flex align-items-center gap-3 animate-fade-in border w-100 order-toast-card">
+                <div class="p-3 rounded-4 bg-success-light text-success">
+                    <i data-lucide="badge-check" class="w-7 h-7"></i>
+                </div>
+                <div class="flex-grow-1">
+                    <h3 class="fw-bold fs-5 mb-1 font-serif">¡Pedido Completado!</h3>
+                    <p class="small text-muted mb-0">
+                        Tu pedido ya está listo y se movió a tu historial de compras.
+                        <span v-if="lastCompletedOrder" class="fw-bold d-block mt-1">S/ {{ lastCompletedOrder.total.toFixed(2) }}</span>
+                    </p>
+                </div>
+                <button @click="showOrderCompleted = false" class="btn-close" aria-label="Ocultar aviso"></button>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MODAL DE PAGO                                                -->
+        <!-- ============================================================ -->
+        <div v-if="showPaymentModal">
+            <div class="modal-backdrop-custom" @click="closePaymentModal"></div>
+            <div class="payment-modal p-4 p-md-5">
+                <div class="d-flex justify-content-between align-items-center border-bottom pb-3 mb-4">
+                    <div>
+                        <h3 class="fw-bold font-serif m-0 fs-4">Finalizar Compra</h3>
+                        <span v-if="paymentOrder && paymentOrder.skippedWait" class="badge bg-accent text-uppercase fw-bold px-2 py-1 rounded-pill mt-2" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 1px;">
+                            <i data-lucide="zap" style="width: 11px;"></i> Sin Tiempo de Espera
+                        </span>
+                    </div>
+                    <button @click="closePaymentModal" class="btn btn-link text-dark p-0"><i data-lucide="x"></i></button>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-12">
+                        <p class="small text-muted fw-bold text-uppercase mb-2" style="letter-spacing: 1px;">Total a Pagar</p>
+                        <h2 class="display-6 fw-bold text-success mb-0">S/ {{ checkoutTotal.toFixed(2) }}</h2>
+                        <p v-if="checkoutDiscount > 0" class="small text-accent fw-bold mt-1 mb-0">Descuento por puntos aplicado: -S/ {{ checkoutDiscount.toFixed(2) }}</p>
+                        <!-- Banner de ahorro en modal de pago -->
+                        <div v-if="checkoutSavings > 0" class="savings-banner mt-2 d-flex align-items-center gap-2">
+                            <i data-lucide="trending-down" style="width: 15px; flex-shrink: 0;"></i>
+                            <span>Ahorraste <strong>S/ {{ checkoutSavings.toFixed(2) }}</strong> eligiendo los mejores precios del mercado</span>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="small text-muted fw-bold text-uppercase mb-3" style="letter-spacing: 1px;">Método de Pago</p>
+                
+                <div class="d-flex flex-column gap-3 mb-4">
+                    <label class="payment-method-box d-flex align-items-center gap-3 m-0" :class="{ 'selected': paymentMethod === 'pagoefectivo' }" @mouseenter="announce('PagoEfectivo o Banca Móvil, genera un código para pagar desde tu app')">
+                        <input type="radio" v-model="paymentMethod" value="pagoefectivo" @focus="announce('PagoEfectivo o Banca Móvil')" class="form-check-input mt-0" style="width: 20px; height: 20px;">
+                        <div class="d-flex flex-column">
+                            <span class="fw-bold" style="font-size: calc(14px * var(--font-scale));">PagoEfectivo / Banca Móvil</span>
+                            <span class="text-muted" style="font-size: calc(11px * var(--font-scale));">Genera un código para pagar desde tu app.</span>
+                        </div>
+                    </label>
+
+                    <label class="payment-method-box d-flex align-items-center gap-3 m-0" :class="{ 'selected': paymentMethod === 'billetera' }" @mouseenter="announce('Yape o Plin, escanea el código QR al confirmar el pedido')">
+                        <input type="radio" v-model="paymentMethod" value="billetera" @focus="announce('Yape o Plin')" class="form-check-input mt-0" style="width: 20px; height: 20px;">
+                        <div class="d-flex flex-column">
+                            <span class="fw-bold" style="font-size: calc(14px * var(--font-scale));">Yape / Plin</span>
+                            <span class="text-muted" style="font-size: calc(11px * var(--font-scale));">Escanea el QR al confirmar el pedido.</span>
+                        </div>
+                    </label>
+
+                    <label class="payment-method-box d-flex align-items-center gap-3 m-0" :class="{ 'selected': paymentMethod === 'tarjeta' }" @mouseenter="announce('Tarjeta de crédito o débito, Visa, Mastercard, Amex')">
+                        <input type="radio" v-model="paymentMethod" value="tarjeta" @focus="announce('Tarjeta de crédito o débito')" class="form-check-input mt-0" style="width: 20px; height: 20px;">
+                        <div class="d-flex flex-column">
+                            <span class="fw-bold" style="font-size: calc(14px * var(--font-scale));">Tarjeta de Crédito / Débito</span>
+                            <span class="text-muted" style="font-size: calc(11px * var(--font-scale));">Visa, Mastercard, Amex.</span>
+                        </div>
+                    </label>
+                </div>
+
+                <div v-if="paymentMethod === 'tarjeta'" class="animate-fade-in mb-4">
+                    <input type="text" class="form-control mb-2 rounded-3" placeholder="Número de Tarjeta">
+                    <div class="row g-2">
+                        <div class="col-6"><input type="text" class="form-control rounded-3" placeholder="MM/AA"></div>
+                        <div class="col-6"><input type="text" class="form-control rounded-3" placeholder="CVV"></div>
+                    </div>
+                </div>
+
+                <button @click="confirmPayment" class="btn-checkout w-100 d-flex justify-content-center align-items-center gap-2" :disabled="isProcessingPayment">
+                    <span v-if="!isProcessingPayment">Pagar S/ {{ checkoutTotal.toFixed(2) }}</span>
+                    <span v-else class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    <span v-if="isProcessingPayment">Procesando...</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MODAL: ERROR DE PAGO                                         -->
+        <!-- ============================================================ -->
+        <div v-if="showPaymentError">
+            <div class="modal-backdrop-custom" @click="cancelPaymentRetry"></div>
+            <div class="error-modal p-4 p-md-5">
+                <div class="error-icon-wrap mb-4">
+                    <i data-lucide="hourglass" style="width: 32px; height: 32px;"></i>
+                </div>
+                <h3 class="fw-bold font-serif fs-4 mb-2">Estamos teniendo un inconveniente</h3>
+                <p class="text-muted mb-4" style="font-size: calc(13.5px * var(--font-scale));">
+                    No pudimos completar tu pago en este momento. No te preocupes, no se realizó ningún cargo doble.
+                </p>
+                <div class="d-flex flex-column gap-2 mb-4">
+                    <div class="error-status-row text-start">
+                        <i data-lucide="shield-check" class="text-success" style="width: 18px; flex-shrink: 0;"></i>
+                        <span><strong>Carrito respaldado:</strong> tus productos están guardados, no necesitas volver a buscarlos.</span>
+                    </div>
+                    <div class="error-status-row text-start">
+                        <i data-lucide="refresh-cw" class="text-success" style="width: 18px; flex-shrink: 0;"></i>
+                        <span><strong>Reintento automático</strong> en {{ retryCountdown }} segundo{{ retryCountdown === 1 ? '' : 's' }}...</span>
+                    </div>
+                </div>
+                <button @click="cancelPaymentRetry" class="btn btn-link text-muted text-decoration-underline p-0" style="font-size: calc(12px * var(--font-scale));">
+                    Cancelar y revisar mi carrito
+                </button>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MODAL: RESEÑAS                                               -->
+        <!-- ============================================================ -->
+        <div v-if="selectedReviewProduct">
+            <div class="modal-backdrop-custom" @click="closeReviews"></div>
+            <div class="reviews-modal p-4 p-md-5">
+                <div class="d-flex justify-content-between align-items-start border-bottom pb-3 mb-4">
+                    <div>
+                        <h3 class="fw-bold font-serif m-0 fs-4">{{ selectedReviewProduct.name }}</h3>
+                        <div class="d-flex align-items-center gap-2 mt-2">
+                            <span class="rating-stars" style="font-size: calc(14px * var(--font-scale));">
+                                <i data-lucide="star" style="width: 15px; height: 15px; fill: currentColor;"></i> {{ selectedReviewProduct.rating }}
+                            </span>
+                            <span class="text-muted small">({{ selectedReviewProduct.reviewCount }} reseñas)</span>
+                        </div>
+                    </div>
+                    <button @click="closeReviews" class="btn btn-link text-dark p-0"><i data-lucide="x"></i></button>
+                </div>
+                <div v-if="getReviews(selectedReviewProduct.id).length === 0" class="text-muted fst-italic text-center py-4">
+                    Aún no hay comentarios escritos para este producto.
+                </div>
+                <div v-else>
+                    <div v-for="(review, idx) in getReviews(selectedReviewProduct.id)" :key="idx" class="review-item">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="fw-bold" style="font-size: calc(13px * var(--font-scale));">{{ review.author }}</span>
+                            <span class="rating-stars" style="font-size: calc(11px * var(--font-scale));">
+                                <i data-lucide="star" style="width: 12px; height: 12px; fill: currentColor;"></i> {{ review.rating }}
+                            </span>
+                        </div>
+                        <p class="text-muted mb-0" style="font-size: calc(13px * var(--font-scale));">{{ review.comment }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- MODAL: COMPARACIÓN DE PRECIOS EN TIEMPO REAL                 -->
+        <!-- ============================================================ -->
+        <div v-if="showPriceComparison && selectedCompareProduct">
+            <div class="modal-backdrop-custom" @click="closePriceComparison"></div>
+            <div class="compare-modal p-4 p-md-5">
+                <!-- Cabecera -->
+                <div class="d-flex justify-content-between align-items-start border-bottom pb-3 mb-4">
+                    <div>
+                        <p class="text-success fw-bold text-uppercase mb-1" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1.5px;">
+                            <i data-lucide="bar-chart-2" style="width: 13px;"></i> Comparación de Precios
+                        </p>
+                        <h3 class="fw-bold font-serif m-0 fs-4">{{ selectedCompareProduct.name }}</h3>
+                    </div>
+                    <button @click="closePriceComparison" @mouseenter="announce('Cerrar comparación de precios')" @focus="announce('Cerrar comparación de precios')" class="btn btn-link text-dark p-0"><i data-lucide="x"></i></button>
+                </div>
+
+                <!-- Ahorro potencial -->
+                <div v-if="getAhorro(selectedCompareProduct) > 0" class="compare-saving-pill mb-4">
+                    <i data-lucide="zap" style="width: 15px;"></i>
+                    Puedes ahorrar hasta <strong>S/ {{ getAhorro(selectedCompareProduct).toFixed(2) }}</strong> eligiendo bien tu puesto
+                </div>
+
+                <!-- Lista de puestos -->
+                <div class="d-flex flex-column gap-3 mb-4">
+                    <label
+                        v-for="puesto in selectedCompareProduct.puestos"
+                        :key="puesto.id"
+                        class="puesto-option-box"
+                        :class="{
+                            'selected': selectedPuestoId === puesto.id,
+                            'cheapest': puesto.id === getPuestoMasBarato(selectedCompareProduct).id && puesto.stock > 0,
+                            'out-of-stock': puesto.stock <= 0
+                        }"
+                        @mouseenter="announce(puesto.nombre + ', S/ ' + puesto.precio.toFixed(2) + (puesto.stock <= 0 ? ', sin stock' : ', ' + puesto.stock + ' unidades disponibles'))"
+                    >
+                        <input type="radio" :value="puesto.id" v-model="selectedPuestoId" :disabled="puesto.stock <= 0" @focus="announce(puesto.nombre + ', S/ ' + puesto.precio.toFixed(2) + (puesto.stock <= 0 ? ', sin stock' : ', ' + puesto.stock + ' unidades disponibles'))" class="visually-hidden">
+
+                        <!-- Etiqueta "Mejor precio" -->
+                        <span v-if="puesto.id === getPuestoMasBarato(selectedCompareProduct).id && puesto.stock > 0" class="best-price-tag">
+                            <i data-lucide="award" style="width: 11px;"></i> Mejor precio
+                        </span>
+                        <span v-else-if="puesto.stock <= 0" class="best-price-tag bg-secondary">
+                            Agotado en este puesto
+                        </span>
+
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <p class="fw-bold mb-0" style="font-size: calc(14px * var(--font-scale));">{{ puesto.nombre }}</p>
+                                <p class="text-muted mb-0" style="font-size: calc(11px * var(--font-scale));">Vendedor: {{ puesto.vendedor }}</p>
+                                <p class="mb-0 mt-1" :class="puesto.stock <= 0 ? 'text-danger' : (puesto.stock <= 5 ? 'text-accent' : 'text-muted')" style="font-size: calc(10px * var(--font-scale)); font-weight: 700;">
+                                    <i data-lucide="package" style="width: 10px;"></i>
+                                    {{ puesto.stock <= 0 ? 'Sin stock' : (puesto.stock + ' unidades disponibles') }}
+                                </p>
+                            </div>
+                            <div class="text-end">
+                                <p class="fw-bold mb-0 fs-5" :class="puesto.id === getPuestoMasBarato(selectedCompareProduct).id ? 'text-success' : 'text-dark'">
+                                    S/ {{ puesto.precio.toFixed(2) }}
+                                </p>
+                                <!-- Diferencia vs precio más barato -->
+                                <p v-if="puesto.precio > getPrecioMin(selectedCompareProduct)" class="text-danger mb-0" style="font-size: calc(10px * var(--font-scale)); font-weight: 700;">
+                                    +S/ {{ (puesto.precio - getPrecioMin(selectedCompareProduct)).toFixed(2) }} más caro
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Barra visual de precio relativo -->
+                        <div class="price-bar-track mt-2">
+                            <div class="price-bar-fill"
+                                :class="puesto.id === getPuestoMasBarato(selectedCompareProduct).id ? 'cheapest-bar' : 'expensive-bar'"
+                                :style="{ width: ((puesto.precio / getPrecioMax(selectedCompareProduct)) * 100) + '%' }">
+                            </div>
+                        </div>
+                    </label>
+                </div>
+
+                <!-- Botón agregar al carrito con el puesto elegido -->
+                <button @click="addToCartFromPuesto" :disabled="!selectedPuestoId || getPuestoStock(selectedCompareProduct, selectedPuestoId) <= 0"
+                        @mouseenter="announce(selectedPuestoId && getPuestoStock(selectedCompareProduct, selectedPuestoId) > 0 ? ('Agregar al carrito, S/ ' + selectedCompareProduct.puestos.find(p => p.id === selectedPuestoId)?.precio.toFixed(2)) : 'Sin stock en este puesto')"
+                        @focus="announce(selectedPuestoId && getPuestoStock(selectedCompareProduct, selectedPuestoId) > 0 ? ('Agregar al carrito, S/ ' + selectedCompareProduct.puestos.find(p => p.id === selectedPuestoId)?.precio.toFixed(2)) : 'Sin stock en este puesto')"
+                        class="btn-checkout w-100 d-flex justify-content-center align-items-center gap-2">
+                    <i data-lucide="shopping-cart" style="width: 18px;"></i>
+                    <span v-if="selectedPuestoId && getPuestoStock(selectedCompareProduct, selectedPuestoId) > 0">
+                        Agregar al carrito · S/ {{ selectedCompareProduct.puestos.find(p => p.id === selectedPuestoId)?.precio.toFixed(2) }}
+                    </span>
+                    <span v-else>Sin stock en este puesto</span>
+                </button>
+
+                <p class="text-center text-muted mt-3 mb-0" style="font-size: calc(11px * var(--font-scale));">
+                    Precios y stock actualizados en tiempo real por cada puesto del mercado.
+                </p>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- CARRITO LATERAL                                              -->
+        <!-- ============================================================ -->
+        <div v-if="isCartOpen" class="cart-overlay" @click="hideCart"></div>
+        <aside :class="['cart-sidebar', isCartOpen ? 'open' : 'closed']">
+            <div class="p-4 d-flex justify-content-between align-items-center border-bottom">
+                <div>
+                    <h2 class="fs-3 fw-bold font-serif mb-0">Tu Carrito</h2>
+                    <p class="small text-success fw-bold text-uppercase mt-1 mb-0" style="letter-spacing: 1px;">Selección Orgánica</p>
+                </div>
+                <button v-if="canHideCart" @click="hideCart" class="btn btn-link text-dark p-0"><i data-lucide="x"></i></button>
+                <span v-else class="text-muted text-end" style="font-size: calc(10px * var(--font-scale)); max-width: 130px; line-height: 1.3;" title="El carrito se puede ocultar después de tu primer pedido">
+                    <i data-lucide="pin" style="width: 13px;"></i> Fijo hasta tu 1ᵉʳ pedido
+                </span>
+            </div>
+
+            <div class="flex-grow-1 overflow-auto p-4 custom-scrollbar">
+
+                <!-- Recordatorio de otros pedidos en curso (esperando pago o en
+                     preparación): no bloquean ni se mezclan con este carrito, cada
+                     uno sigue su propio camino de forma independiente. -->
+                <div v-if="pendingOrders.length > 0 || currentOrders.length > 0" class="one-click-note mb-4 d-flex align-items-start gap-2">
+                    <i data-lucide="info" style="width: 16px; flex-shrink: 0; margin-top: 2px;"></i>
+                    <span>
+                        Tienes {{ pendingOrders.length + currentOrders.length }} pedido{{ (pendingOrders.length + currentOrders.length) === 1 ? '' : 's' }} en curso, independiente{{ (pendingOrders.length + currentOrders.length) === 1 ? '' : 's' }} de este carrito.
+                        <button @click="view = 'cuenta'; hideCart()" class="btn btn-link p-0 text-accent fw-bold text-decoration-underline" style="font-size: inherit;">Ver Mis Pedidos</button>
+                    </span>
+                </div>
+
+                <div v-if="cart.length === 0" class="h-100 d-flex align-items-center justify-content-center text-muted fst-italic opacity-50">
+                    <p>Cesta vacía por ahora...</p>
+                </div>
+
+                <div v-else>
+                    <div v-for="item in cart" :key="item.cartId" class="d-flex gap-3 mb-4">
+                        <div class="cart-item-img">
+                            <img :src="item.img" class="w-100 h-100 object-fit-cover" :alt="item.name" />
+                        </div>
+                        <div class="d-flex flex-column justify-content-between flex-grow-1">
+                            <div class="d-flex justify-content-between">
+                                <h4 class="fw-bold fs-6 mb-0">{{ item.name }}</h4>
+                                <button @click="removeFromCart(item.cartId)" class="btn btn-sm text-danger p-0">
+                                    <i data-lucide="trash-2" style="width: 16px;"></i>
+                                </button>
+                            </div>
+                            <!-- Muestra el puesto elegido si aplica -->
+                            <p v-if="item.puestoNombre" class="mb-0" style="font-size: calc(10px * var(--font-scale)); color: var(--primary-color); font-weight: 700;">
+                                <i data-lucide="map-pin" style="width: 10px;"></i> {{ item.puestoNombre }}
+                            </p>
+                            <p v-else class="text-muted small text-uppercase mb-2" style="font-size: calc(10px * var(--font-scale));">{{ item.category }}</p>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold">S/ {{ (item.price * item.qty).toFixed(2) }}</span>
+                                <div class="d-flex align-items-center gap-2 bg-light px-2 py-1 rounded">
+                                    <button class="btn btn-sm p-0" @click="updateQty(item.cartId, -1)"><i data-lucide="minus" style="width: 14px;"></i></button>
+                                    <span class="fw-bold mx-1" style="font-size: calc(12px * var(--font-scale));">{{ item.qty }}</span>
+                                    <button class="btn btn-sm p-0" :disabled="!canIncreaseCartItem(item)" @click="updateQty(item.cartId, 1)"><i data-lucide="plus" style="width: 14px;"></i></button>
+                                </div>
+                            </div>
+                            <p v-if="!canIncreaseCartItem(item)" class="text-danger fw-bold text-uppercase mb-0 mt-1" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 0.5px;">Sin más stock en este puesto</p>
+                        </div>
+                    </div>
+
+                    <!-- Banner de ahorro total en carrito -->
+                    <div v-if="totalSavingsInCart > 0" class="savings-banner mt-2 mb-3">
+                        <i data-lucide="trending-down" style="width: 14px; flex-shrink:0;"></i>
+                        <span>Estás ahorrando <strong>S/ {{ totalSavingsInCart.toFixed(2) }}</strong> vs. precios más altos del mercado</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-white border-top shadow-sm">
+                <div class="mb-4">
+                    <p class="small text-muted fw-bold text-uppercase mb-3">Método de Entrega</p>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <button @click="deliveryMethod = 'recoger'" :class="['btn w-100 py-3 d-flex flex-column align-items-center gap-2 rounded-4 border border-2', deliveryMethod === 'recoger' ? 'border-success text-success bg-success-light' : 'border-light text-muted']">
+                                <i data-lucide="store" style="width: 24px; height: 24px;"></i>
+                                <span class="fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">Recoger</span>
+                            </button>
+                        </div>
+                        <div class="col-6">
+                            <button @click="deliveryMethod = 'delivery'" :class="['btn w-100 py-3 d-flex flex-column align-items-center gap-2 rounded-4 border border-2', deliveryMethod === 'delivery' ? 'border-success text-success bg-success-light' : 'border-light text-muted']">
+                                <i data-lucide="bike" style="width: 24px; height: 24px;"></i>
+                                <span class="fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">Delivery</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div v-if="activeDiscount > 0" class="discount-banner d-flex align-items-center gap-2 mb-3">
+                    <i data-lucide="ticket" style="width: 16px;"></i>
+                    <span>Descuento por puntos: -S/ {{ activeDiscount.toFixed(2) }} se aplicará al pagar</span>
+                </div>
+
+                <button @click="proceedToCheckout" :disabled="cart.length === 0"
+                        @mouseenter="announce('Proceder al pago, total S/ ' + cartTotal.toFixed(2))"
+                        @focus="announce('Proceder al pago, total S/ ' + cartTotal.toFixed(2))"
+                        class="btn-checkout w-100 d-flex justify-content-center align-items-center gap-2">
+                    Proceder al Pago · S/ {{ cartTotal.toFixed(2) }}
+                </button>
+                <p class="text-muted text-center mt-2 mb-0" style="font-size: calc(10.5px * var(--font-scale));">
+                    Tendrás {{ Math.round(PAYMENT_WAIT_SECONDS / 60) }} min para revisar tu pedido antes de ver las opciones de pago, o puedes terminar la compra sin tiempo extra.
+                </p>
+            </div>
+        </aside>
+
+        <!-- ============================================================ -->
+        <!-- HEADER                                                        -->
+        <!-- ============================================================ -->
+        <header class="nav-header bg-white shadow-sm sticky-top" style="height: 5rem;">
+            <nav class="container h-100 d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-3">
+                    <button @click="view = 'tienda'" class="btn btn-link text-decoration-none d-flex align-items-center gap-2 p-0 text-dark">
+                        <i data-lucide="leaf" class="text-success fill-current"></i>
+                        <h1 class="fs-5 fw-bold fst-italic mb-0 d-none d-sm-block font-serif">Esencia Urbana</h1>
+                    </button>
+                    
+                    <div class="d-flex gap-3 ms-4 ps-4 border-start">
+                        <button v-for="item in ['tienda', 'ofertas', 'frecuentes', 'comparar', 'cuenta', 'ajustes']" :key="item" 
+                                @click="view = item" 
+                                @mouseenter="announce('Ir a ' + item)" @focus="announce('Ir a ' + item)"
+                                :class="['nav-link text-uppercase fw-bold bg-transparent border-0 p-0', view === item ? 'text-success' : 'text-muted']"
+                                style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">
+                            {{ item }}
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="d-flex align-items-center gap-3">
+                    <button v-if="isDictationEnabled" @click="handleListen" :disabled="isListening"
+                            :class="['btn btn-link p-0 rounded-circle position-relative', isListening ? 'text-danger' : 'text-muted']"
+                            :aria-label="isListening ? 'Escuchando, di un comando' : 'Activar dictado por voz'"
+                            :title="isListening ? 'Escuchando…' : 'Di un comando o el nombre de un producto'">
+                        <i data-lucide="mic" style="width: 20px;"></i>
+                        <span v-if="isListening" class="mic-pulse-ring"></span>
+                    </button>
+
+                    <div class="d-none d-md-flex position-relative">
+                        <input type="text" v-model="searchQuery" @focus="announce('Buscar producto')" placeholder="Buscar producto..." aria-label="Buscar producto" class="form-control form-control-sm rounded-pill px-4 border" style="font-size: calc(12px * var(--font-scale)); height: 35px; min-width: 200px;" />
+                    </div>
+
+                    <button @click="toggleCart" @mouseenter="announce('Carrito, ' + cart.length + (cart.length === 1 ? ' producto' : ' productos'))" @focus="announce('Carrito, ' + cart.length + (cart.length === 1 ? ' producto' : ' productos'))" class="btn btn-link text-dark position-relative p-1 ms-2" aria-label="Mostrar u ocultar el carrito de compras">
+                        <i data-lucide="shopping-cart" style="width: 22px;"></i>
+                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="font-size: calc(10px * var(--font-scale));">
+                            {{ cart.length }}
+                        </span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- Retroalimentación del dictado por voz (accesible con aria-live para lectores de pantalla) -->
+            <div v-if="isDictationEnabled && (isListening || voiceFeedback)" class="voice-feedback-bar" aria-live="polite" role="status">
+                <div class="container d-flex align-items-center gap-2 py-2">
+                    <i :data-lucide="isListening ? 'mic' : 'check-circle'" class="flex-shrink-0" :class="isListening ? 'text-danger' : 'text-success'" style="width: 16px;"></i>
+                    <span v-if="isListening" class="fw-bold" style="font-size: calc(12.5px * var(--font-scale));">Escuchando… di un producto o un comando (ej. "agregar arroz", "ir a ofertas", "ayuda").</span>
+                    <span v-else style="font-size: calc(12.5px * var(--font-scale));">
+                        <span v-if="voiceHeard" class="text-muted">Escuché: "{{ voiceHeard }}" — </span>
+                        <span class="fw-bold">{{ voiceFeedback }}</span>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ============================================================ -->
+        <!-- MAIN CONTENT                                                  -->
+        <!-- ============================================================ -->
+        <main class="container py-5 animate-fade-in">
+            
+            <!-- VISTA: MI CUENTA -->
+            <section v-if="view === 'cuenta'" class="row justify-content-center">
+                <div class="col-md-8 mb-4">
+                    <div class="card rounded-5 border-0 shadow-sm p-5 h-100">
+                        <div class="d-flex align-items-center gap-4 mb-5">
+                            <div class="rounded-circle bg-success text-white d-flex align-items-center justify-content-center fs-2 fw-bold" style="width: 100px; height: 100px;">
+                                CR
+                            </div>
+                            <div>
+                                <h3 class="display-6 fw-bold font-serif mb-1">Carlos Rodríguez</h3>
+                                <p class="text-muted mb-3">carlos.rodriguez@email.com</p>
+                                <div class="d-flex gap-2">
+                                    <span class="badge bg-success-light text-success border-success border px-3 py-2 rounded-pill fw-bold" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">CLIENTE GOLD</span>
+                                    <span class="badge bg-light text-muted border px-3 py-2 rounded-pill fw-bold" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">{{ purchaseHistory.length }} {{ purchaseHistory.length === 1 ? 'PEDIDO' : 'PEDIDOS' }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mt-4 pt-4 border-top">
+                            <div class="col-6">
+                                <p class="small text-success fw-bold text-uppercase mb-2" style="letter-spacing: 1px;">Dirección Principal</p>
+                                <p class="mb-0 fw-medium">Asoc. Los Pinos, Puente Piedra</p>
+                            </div>
+                            <div class="col-6">
+                                <p class="small text-success fw-bold text-uppercase mb-2" style="letter-spacing: 1px;">Teléfono</p>
+                                <p class="mb-0 fw-medium">+51 987 654 321</p>
+                            </div>
+                        </div>
+                        <div class="mt-4 pt-2">
+                            <button class="btn btn-link text-accent fw-bold text-uppercase p-0 text-decoration-underline" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">EDITAR PERFIL</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- ============================================================ -->
+                <!-- MIS PEDIDOS: lista única que funciona como historial completo -->
+                <!-- (pedidos en marcha + completados + cancelados, del más reciente -->
+                <!-- al más antiguo). Empieza vacía para una cuenta nueva.          -->
+                <!-- ============================================================ -->
+                <div class="col-12 mb-4">
+                    <div class="card rounded-5 border-0 shadow-sm p-4 p-md-5">
+                        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                            <h3 class="fs-4 fw-bold font-serif mb-0">Mis Pedidos</h3>
+                            <div class="d-flex align-items-center gap-3">
+                                <span v-if="currentOrders.length > 0" class="badge bg-success-light text-success border border-success px-3 py-2 rounded-pill fw-bold d-flex align-items-center gap-2" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">
+                                    <i data-lucide="radio" style="width: 12px; height: 12px;"></i> EN TIEMPO REAL
+                                </span>
+                                <button v-if="completedOrdersHistory.length > 0" @click="clearPurchaseHistory"
+                                        @mouseenter="announce('Vaciar historial de pedidos completados')" @focus="announce('Vaciar historial de pedidos completados')"
+                                        class="btn btn-link text-danger fw-bold text-uppercase p-0 d-flex align-items-center gap-2" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">
+                                    <i data-lucide="trash-2" style="width: 15px;"></i> Vaciar Historial
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="purchaseHistory.length === 0 && pendingOrders.length === 0" class="text-muted fst-italic text-center py-4">
+                            Aún no tienes pedidos. Tu historial empezará a llenarse en cuanto hagas tu primera compra.
+                        </div>
+
+                        <!-- Pedidos aún sin pagar, en su ventana de espera de 5 minutos -->
+                        <div v-if="pendingOrders.length > 0" class="d-flex flex-column gap-3 mb-3">
+                            <div v-for="order in pendingOrders" :key="'pend-' + order.id" class="history-order-card">
+                                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                                    <span class="small text-muted fw-bold text-uppercase" style="letter-spacing: 1px; font-size: calc(10px * var(--font-scale));">Esperando pago</span>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <span class="badge px-3 py-2 rounded-pill fw-bold bg-warning-light text-warning border border-warning" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">
+                                            {{ order.readyForPayment ? 'Listo para pagar' : formatTime(order.countdown) }}
+                                        </span>
+                                        <span class="badge bg-light text-dark border px-3 py-2 rounded-pill fw-bold" style="font-size: calc(10px * var(--font-scale));">S/ {{ (order.items.reduce((a,i)=>a+i.price*i.qty,0) - (order.discount||0)).toFixed(2) }}</span>
+                                    </div>
+                                </div>
+                                <div class="d-flex flex-column gap-2 mb-3">
+                                    <div v-for="item in order.items" :key="item.cartId || item.id" class="d-flex align-items-center gap-2">
+                                        <div class="history-item-thumb">
+                                            <img :src="item.img" class="w-100 h-100 object-fit-cover" :alt="item.name" />
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <span class="small d-block">{{ item.name }}</span>
+                                            <span class="text-muted" style="font-size: calc(10px * var(--font-scale));">S/ {{ (item.price * item.qty).toFixed(2) }}</span>
+                                        </div>
+                                        <template v-if="!order.readyForPayment">
+                                            <div class="d-flex align-items-center gap-2 bg-light px-2 py-1 rounded">
+                                                <button class="btn btn-sm p-0" @click="updateOrderItemQty(order.id, item.cartId, -1)"><i data-lucide="minus" style="width: 12px;"></i></button>
+                                                <span class="fw-bold mx-1" style="font-size: calc(11px * var(--font-scale));">{{ item.qty }}</span>
+                                                <button class="btn btn-sm p-0" :disabled="!canIncreaseOrderItem(item)" @click="updateOrderItemQty(order.id, item.cartId, 1)"><i data-lucide="plus" style="width: 12px;"></i></button>
+                                            </div>
+                                            <button class="btn btn-sm text-danger p-0" @click="removeOrderItem(order.id, item.cartId)" aria-label="Quitar producto">
+                                                <i data-lucide="trash-2" style="width: 14px;"></i>
+                                            </button>
+                                        </template>
+                                        <span v-else class="text-muted small fw-bold">x{{ item.qty }}</span>
+                                    </div>
+                                </div>
+                                <div class="d-flex flex-wrap gap-3 align-items-center">
+                                    <button v-if="!order.readyForPayment" @click="finishWaitNow(order.id)" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-2 fw-bold text-uppercase" style="font-size: calc(9.5px * var(--font-scale)); letter-spacing: 0.5px;">Terminar Compra sin Tiempo Extra</button>
+                                    <button v-if="!order.readyForPayment" @click="cancelPendingOrder(order.id)" class="btn btn-sm btn-link text-danger fw-bold text-uppercase p-0" style="font-size: calc(9.5px * var(--font-scale)); letter-spacing: 0.5px;">Cancelar Pedido</button>
+                                    <button v-if="order.readyForPayment" @click="openPaymentModalForOrder(order.id)" class="btn-checkout px-4 py-2" style="font-size: calc(10.5px * var(--font-scale));">Ver Opciones de Pago</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="purchaseHistory.length > 0" class="d-flex flex-column gap-3">
+                            <div v-for="order in purchaseHistory" :key="order.id" class="history-order-card">
+                                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                                    <span class="small text-muted fw-bold text-uppercase" style="letter-spacing: 1px; font-size: calc(10px * var(--font-scale));">{{ formatDate(order.date) }}</span>
+                                    <div class="d-flex gap-2 align-items-center">
+                                        <span v-if="order.status === 'en_proceso'" class="badge px-3 py-2 rounded-pill fw-bold bg-success-light text-success border border-success" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">
+                                            En preparación · {{ formatTime(order.countdown) }}
+                                        </span>
+                                        <span v-else :class="['badge px-3 py-2 rounded-pill fw-bold border', order.status === 'cancelado' ? 'bg-light text-danger border-danger' : 'bg-success-light text-success border-success']" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">
+                                            {{ order.status === 'cancelado' ? 'Cancelado' : 'Completado' }}
+                                        </span>
+                                        <span class="badge bg-light text-dark border px-3 py-2 rounded-pill fw-bold" style="font-size: calc(10px * var(--font-scale));">S/ {{ order.total.toFixed(2) }}</span>
+                                        <span v-if="order.savings && order.savings > 0" class="badge bg-light text-success border px-3 py-2 rounded-pill fw-bold" style="font-size: calc(10px * var(--font-scale));">
+                                            Ahorraste S/ {{ order.savings.toFixed(2) }}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div class="d-flex flex-wrap gap-3 mb-2">
+                                    <div v-for="item in order.items" :key="item.cartId || item.id" class="d-flex align-items-center gap-2">
+                                        <div class="history-item-thumb">
+                                            <img :src="item.img" class="w-100 h-100 object-fit-cover" :alt="item.name" />
+                                        </div>
+                                        <div>
+                                            <span class="small">{{ item.name }} <span class="text-muted">x{{ item.qty }}</span></span>
+                                            <p v-if="item.puestoNombre" class="mb-0" style="font-size: calc(9px * var(--font-scale)); color: var(--primary-color); font-weight: 700;">{{ item.puestoNombre }}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <p v-if="order.status === 'en_proceso'" class="text-muted fst-italic mb-0" style="font-size: calc(10.5px * var(--font-scale));">
+                                    Tu pedido ya está pagado y en preparación.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-4 d-flex flex-column gap-4">
+                    <div class="card rounded-5 border-0 shadow-sm text-white p-5 text-start h-50 justify-content-center" style="background-color: var(--primary-color);">
+                        <p class="text-uppercase fw-bold mb-2" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">Mis Puntos</p>
+                        <h3 class="display-4 fw-bold font-serif mb-2">{{ loyaltyPoints.toLocaleString('es-PE') }}</h3>
+                        <p class="mb-4" style="font-size: calc(11px * var(--font-scale)); opacity: 0.85;">Ganas puntos en cada compra. Acumula {{ REDEEM_COST }} para canjear S/ {{ REDEEM_DISCOUNT }} de descuento.</p>
+                        <button @click="redeemPoints" :disabled="loyaltyPoints < REDEEM_COST"
+                                class="btn w-100 rounded-4 fw-bold py-3"
+                                :style="{ backgroundColor: loyaltyPoints < REDEEM_COST ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.2)', color: loyaltyPoints < REDEEM_COST ? 'rgba(255,255,255,0.6)' : 'white', cursor: loyaltyPoints < REDEEM_COST ? 'not-allowed' : 'pointer', fontSize: '12px', letterSpacing: '1px' }">
+                            {{ loyaltyPoints < REDEEM_COST ? `FALTAN ${REDEEM_COST - loyaltyPoints} PUNTOS` : `CANJEAR ${REDEEM_COST} PUNTOS` }}
+                        </button>
+                        <p v-if="activeDiscount > 0" class="small fw-bold mt-3 mb-0" style="font-size: calc(11px * var(--font-scale));">
+                            <i data-lucide="check-circle" style="width: 13px; height: 13px;"></i> Tienes S/ {{ activeDiscount.toFixed(2) }} en descuento listo para tu próxima compra.
+                        </p>
+                    </div>
+
+                    <div class="card rounded-5 border-0 shadow-sm p-4 h-50">
+                        <p class="text-muted fw-bold text-uppercase mb-4" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">Menú de Usuario</p>
+                        <div class="d-flex flex-column gap-4">
+                            <button class="btn btn-link text-decoration-none text-accent text-start d-flex align-items-center gap-3 p-0 fw-bold">
+                                <i data-lucide="log-out" style="width: 18px;"></i> Cerrar Sesión
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- VISTA: AJUSTES -->
+            <section v-else-if="view === 'ajustes'" class="row justify-content-center">
+                <div class="col-md-9">
+                    <h2 class="display-5 fw-bold font-serif mb-4">Ajustes de Accesibilidad</h2>
+                    <div class="card rounded-5 border-0 shadow-sm p-4 px-md-5 py-md-5">
+
+                        <!-- Modo Oscuro -->
+                        <div class="d-flex justify-content-between align-items-center bg-white border p-4 rounded-4 mb-4 shadow-sm">
+                            <div>
+                                <h3 class="fs-5 fw-bold mb-2"><i :data-lucide="isDarkMode ? 'moon' : 'sun'" class="text-success me-2" style="width: 20px;"></i> Modo Oscuro</h3>
+                                <p class="text-muted small mb-0">Cambia la apariencia de la tienda a colores oscuros, ideal para ambientes con poca luz.</p>
+                            </div>
+                            <div class="form-check form-switch fs-3 m-0">
+                                <input class="form-check-input" type="checkbox" role="switch" v-model="isDarkMode"
+                                       @focus="announce('Modo oscuro, ' + (isDarkMode ? 'activado' : 'desactivado'))"
+                                       aria-label="Activar modo oscuro">
+                            </div>
+                        </div>
+
+                        <!-- Tamaño de Texto -->
+                        <div class="bg-white border p-4 rounded-4 mb-4 shadow-sm">
+                            <div class="d-flex align-items-center mb-3">
+                                <i data-lucide="type" class="text-success me-2" style="width: 20px;"></i>
+                                <h3 class="fs-5 fw-bold mb-0">Tamaño de Texto</h3>
+                            </div>
+                            <p class="text-muted small mb-3">Ajusta el tamaño de las letras en toda la tienda para una lectura más cómoda.</p>
+                            <div class="d-flex flex-wrap gap-2">
+                                <button v-for="opt in FONT_SIZE_OPTIONS" :key="opt.key"
+                                        @click="setFontSize(opt.key)"
+                                        @mouseenter="announce('Tamaño de texto ' + opt.label)" @focus="announce('Tamaño de texto ' + opt.label)"
+                                        :class="['btn rounded-pill px-4 py-2 fw-bold flex-shrink-0', fontSizeKey === opt.key ? 'btn-success text-white' : 'bg-white text-muted border border-2']"
+                                        :style="{ fontSize: (13 + FONT_SIZE_OPTIONS.findIndex(o => o.key === opt.key) * 1.5) + 'px' }">
+                                    {{ opt.label }}
+                                </button>
+                            </div>
+                            <p class="text-muted mt-3 mb-0" style="font-size: calc(12px * var(--font-scale));">
+                                Vista previa: <span class="fw-bold" style="color: var(--text-color);">Así se verá el texto en Esencia Urbana.</span>
+                            </p>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center bg-white border p-4 rounded-4 mb-4 shadow-sm">
+                            <div>
+                                <h3 class="fs-5 fw-bold mb-2"><i data-lucide="volume-2" class="text-success me-2" style="width: 20px;"></i> Lector de Accesibilidad</h3>
+                                <p class="text-muted small mb-0">Lee en voz alta lo que tocas o enfocas con el teclado: productos (nombre, precio y disponibilidad), categorías, botones de navegación, el carrito, métodos de pago, opciones de puesto y controles de ajustes. Pensado para personas con discapacidad visual o motriz.</p>
+                                <p v-if="isDictationEnabled" class="text-warning small fw-bold mb-0 mt-2"><i data-lucide="info" style="width: 13px;"></i> Se desactivará el Dictado de Voz, no pueden usarse juntos.</p>
+                            </div>
+                            <div class="form-check form-switch fs-3 m-0">
+                                <input class="form-check-input" type="checkbox" role="switch" v-model="isVoiceReaderEnabled" aria-label="Activar lector de accesibilidad">
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center bg-white border p-4 rounded-4 shadow-sm">
+                            <div>
+                                <h3 class="fs-5 fw-bold mb-2"><i data-lucide="mic" class="text-success me-2" style="width: 20px;"></i> Dictado de Voz</h3>
+                                <p class="text-muted small mb-1">Añade un botón de micrófono en la cabecera para controlar la tienda por voz: buscar y agregar productos, navegar entre secciones, abrir el carrito, pagar y más, con confirmación hablada de cada acción.</p>
+                                <p class="text-muted small mb-0" style="font-size: calc(11px * var(--font-scale));">Ejemplos: "agregar arroz", "quitar aceite", "ir a ofertas", "abrir carrito", "pagar", "modo oscuro", "ayuda".</p>
+                                <p v-if="isVoiceReaderEnabled" class="text-warning small fw-bold mb-0 mt-2"><i data-lucide="info" style="width: 13px;"></i> Se desactivará el Lector de Accesibilidad, no pueden usarse juntos.</p>
+                            </div>
+                            <div class="form-check form-switch fs-3 m-0">
+                                <input class="form-check-input" type="checkbox" role="switch" v-model="isDictationEnabled">
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            <!-- ============================================================ -->
+            <!-- VISTA: COMPARAR PRECIOS (PÁGINA DEDICADA)                    -->
+            <!-- ============================================================ -->
+            <section v-else-if="view === 'comparar'" class="animate-fade-in">
+                <div class="mb-5">
+                    <p class="text-success fw-bold text-uppercase mb-2" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 2px;">
+                        <i data-lucide="bar-chart-2" style="width: 14px;"></i> Herramienta
+                    </p>
+                    <h2 class="display-5 fw-bold font-serif mb-2">Comparar Precios</h2>
+                    <p class="text-muted" style="max-width: 560px; font-size: calc(14px * var(--font-scale));">
+                        Visualiza en tiempo real el precio de cada producto en los distintos puestos del mercado y elige siempre la mejor opción para tu familia.
+                    </p>
+                </div>
+
+                <!-- Filtros de categoría -->
+                <div class="d-flex gap-3 mb-5 overflow-auto custom-scrollbar pb-2">
+                    <button v-for="cat in categories" :key="cat" 
+                            @click="activeCategory = cat" 
+                            @mouseenter="announce('Categoria ' + cat)" @focus="announce('Categoria ' + cat)"
+                            :class="['btn rounded-pill px-4 py-2 text-uppercase fw-bold flex-shrink-0', activeCategory === cat ? 'btn-success text-white' : 'bg-white text-muted border border-2']"
+                            style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">
+                        {{ cat }}
+                    </button>
+                </div>
+
+                <!-- Tabla de comparación de precios -->
+                <div class="compare-table-wrapper rounded-5 overflow-hidden shadow-sm border">
+                    <!-- Cabecera de la tabla -->
+                    <div class="compare-table-header d-flex align-items-center px-4 py-3">
+                        <div style="flex: 2;" class="small fw-bold text-uppercase text-muted" style="letter-spacing: 1px; font-size: calc(10px * var(--font-scale));">Producto</div>
+                        <div style="flex: 1;" class="text-center small fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); color: var(--primary-color);">Puesto La Esperanza</div>
+                        <div style="flex: 1;" class="text-center small fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); color: #888;">Puesto Don Pepe</div>
+                        <div style="flex: 1;" class="text-center small fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); color: #888;">Puesto El Rincón</div>
+                        <div style="flex: 0.6;" class="text-center small fw-bold text-uppercase" style="font-size: calc(10px * var(--font-scale)); color: var(--accent-color);">Mejor Precio</div>
+                    </div>
+
+                    <!-- Filas de productos -->
+                    <div v-for="(product, idx) in filteredProducts" :key="'compare-' + product.id"
+                         :class="['compare-table-row d-flex align-items-center px-4 py-3', idx % 2 === 0 ? 'bg-white' : 'compare-row-alt']"
+                         tabindex="0"
+                         @mouseenter="announce(product.name + '. ' + product.puestos.map(p => p.nombre + ', ' + (p.stock > 0 ? ('S/ ' + p.precio.toFixed(2)) : 'sin stock')).join('. ') + '. Mejor precio: S/ ' + getPrecioMin(product).toFixed(2))"
+                         @focus="announce(product.name + '. ' + product.puestos.map(p => p.nombre + ', ' + (p.stock > 0 ? ('S/ ' + p.precio.toFixed(2)) : 'sin stock')).join('. ') + '. Mejor precio: S/ ' + getPrecioMin(product).toFixed(2))">
+                        
+                        <!-- Producto -->
+                        <div style="flex: 2;" class="d-flex align-items-center gap-3">
+                            <img :src="product.img" :alt="product.name" class="compare-product-thumb" />
+                            <div>
+                                <p class="fw-bold mb-0" style="font-size: calc(13px * var(--font-scale));">{{ product.name }}</p>
+                                <p class="text-muted mb-0" style="font-size: calc(10px * var(--font-scale)); text-transform: uppercase; letter-spacing: 0.5px;">{{ product.category }}</p>
+                                <span v-if="isOutOfStock(product)" class="badge badge-stock-out" style="font-size: calc(8px * var(--font-scale));">AGOTADO</span>
+                            </div>
+                        </div>
+
+                        <!-- Precios por puesto -->
+                        <div v-for="puesto in product.puestos" :key="puesto.id" style="flex: 1;" class="text-center">
+                            <span :class="['compare-price-cell fw-bold', puesto.precio === getPrecioMin(product) && puesto.stock > 0 ? 'best-price-cell' : '', puesto.stock <= 0 ? 'opacity-50' : '']">
+                                S/ {{ puesto.precio.toFixed(2) }}
+                            </span>
+                            <p v-if="puesto.stock <= 0" class="mb-0 text-danger fw-bold" style="font-size: calc(9px * var(--font-scale)); margin-top: 2px;">Sin stock</p>
+                            <p v-else-if="puesto.precio === getPrecioMin(product)" class="mb-0" style="font-size: calc(9px * var(--font-scale)); color: var(--primary-color); font-weight: 700; margin-top: 2px;">✓ Más barato</p>
+                            <p v-else class="mb-0 text-danger" style="font-size: calc(9px * var(--font-scale)); margin-top: 2px;">+S/ {{ (puesto.precio - getPrecioMin(product)).toFixed(2) }}</p>
+                            <p class="mb-0 text-muted" style="font-size: calc(8.5px * var(--font-scale)); margin-top: 1px;">{{ puesto.stock > 0 ? puesto.stock + ' unid.' : '' }}</p>
+                        </div>
+
+                        <!-- Ahorro posible + botón -->
+                        <div style="flex: 0.6;" class="text-center">
+                            <p class="fw-bold mb-1" style="font-size: calc(13px * var(--font-scale)); color: var(--primary-color);">S/ {{ getPrecioMin(product).toFixed(2) }}</p>
+                            <p v-if="getAhorro(product) > 0" class="mb-2" style="font-size: calc(9px * var(--font-scale)); color: #888;">Ahorras S/ {{ getAhorro(product).toFixed(2) }}</p>
+                            <button @click="openPriceComparison(product)" :disabled="isOutOfStock(product)"
+                                    @mouseenter.stop="announce(isOutOfStock(product) ? (product.name + ', agotado') : ('Elegir puesto para ' + product.name + ', desde S/ ' + getPrecioMin(product).toFixed(2)))"
+                                    @focus.stop="announce(isOutOfStock(product) ? (product.name + ', agotado') : ('Elegir puesto para ' + product.name + ', desde S/ ' + getPrecioMin(product).toFixed(2)))"
+                                    class="btn btn-add-custom rounded-pill px-3 py-1 d-inline-flex align-items-center gap-1"
+                                    style="font-size: calc(10px * var(--font-scale)); font-weight: 700;">
+                                <i data-lucide="plus" style="width: 12px;"></i> Elegir
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Leyenda -->
+                <div class="d-flex align-items-center gap-4 mt-4" style="font-size: calc(11px * var(--font-scale)); color: #999;">
+                    <span class="d-flex align-items-center gap-1"><span style="width: 10px; height: 10px; border-radius: 50%; background: var(--primary-color); display: inline-block;"></span> Precio más bajo</span>
+                    <span class="d-flex align-items-center gap-1"><span style="width: 10px; height: 10px; border-radius: 50%; background: #E8A33D; display: inline-block;"></span> Precio más alto</span>
+                    <span>Precios actualizados en tiempo real</span>
+                </div>
+            </section>
+
+            <!-- ============================================================ -->
+            <!-- VISTA: COMPRAS FRECUENTES (PÁGINA DEDICADA)                  -->
+            <!-- ============================================================ -->
+            <section v-else-if="view === 'frecuentes'" class="animate-fade-in">
+                <div class="mb-5">
+                    <p class="text-success fw-bold text-uppercase mb-2" style="font-size: calc(11px * var(--font-scale)); letter-spacing: 2px;">
+                        <i data-lucide="repeat" style="width: 14px;"></i> Basado en tu historial
+                    </p>
+                    <h2 class="display-5 fw-bold font-serif mb-2">Compras Frecuentes</h2>
+                    <p class="text-muted" style="max-width: 560px; font-size: calc(14px * var(--font-scale));">
+                        Los productos que más compras, listos para agregar de nuevo en un clic.
+                    </p>
+                </div>
+
+                <div v-if="frequentProducts.length === 0" class="text-muted fst-italic text-center py-5">
+                    Aún no tienes compras registradas para mostrar aquí.
+                </div>
+
+                <div v-else class="row g-4">
+                    <div class="col-12 col-sm-6 col-lg-3" v-for="product in frequentProducts" :key="'freq-' + product.id">
+                        <div class="card h-100 rounded-4 border-0 shadow-sm product-card" :class="{ 'is-out-of-stock': isOutOfStock(product) }" @mouseenter="announce(product.name + ', comprado ' + product.timesBought + ' veces, S/ ' + product.price.toFixed(2))">
+                            <div class="position-relative">
+                                <img :src="product.img" class="card-img-top rounded-top-4 object-fit-cover" style="height: 260px;" :alt="product.name" />
+                                <span class="frequent-badge-count position-absolute top-0 end-0 m-3">x{{ product.timesBought }}</span>
+                            </div>
+                            <div class="card-body d-flex flex-column p-4">
+                                <p class="text-success fw-bold text-uppercase mb-2" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">{{ product.category }}</p>
+                                <h5 class="card-title fw-bold font-serif mb-2" style="font-size: 1.15rem;">{{ product.name }}</h5>
+                                <div class="mt-auto d-flex justify-content-between align-items-end">
+                                    <span class="fs-4 fw-bold">S/ {{ product.price.toFixed(2) }}</span>
+                                    <button @click="addToCart(product)" :disabled="isOutOfStock(product)"
+                                            @mouseenter="announce(isOutOfStock(product) ? (product.name + ', agotado') : ('Agregar ' + product.name + ' al carrito, S/ ' + product.price.toFixed(2)))"
+                                            @focus="announce('Agregar ' + product.name + ' al carrito')"
+                                            :aria-label="'Agregar ' + product.name + ' al carrito'"
+                                            class="btn btn-add-custom rounded-circle p-2 d-flex align-items-center justify-content-center" style="width: 45px; height: 45px;">
+                                        <i :data-lucide="isOutOfStock(product) ? 'x' : 'plus'" style="width: 20px;"></i>
+                                    </button>
+                                </div>
+                                <p v-if="isOutOfStock(product)" class="text-danger fw-bold text-uppercase mt-2 mb-0" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 0.5px;">Agotado</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- VISTA: TIENDA / OFERTAS -->
+            <template v-else>
+                <div class="card bg-white rounded-5 border-0 shadow-sm mb-5 overflow-hidden">
+                    <div class="row g-0 align-items-center p-md-5 p-4">
+                        <div class="col-md-6 p-4">
+                            <h2 class="display-3 fw-bold font-serif mb-4 line-height-sm">
+                                {{ view === 'ofertas' ? 'Ofertas del ' : 'Lo esencial, ' }} <br /> 
+                                <span class="text-success">{{ view === 'ofertas' ? 'Mes.' : 'siempre a tu alcance.' }}</span>
+                            </h2>
+                            <button @click="activeCategory = 'TODOS'" class="btn btn-dark rounded-pill px-4 py-3 mt-2 text-uppercase fw-bold" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">
+                                Ver Catálogo
+                            </button>
+                        </div>
+                        <div class="col-md-6 text-center">
+                            <div class="d-inline-block border border-5 border-white rounded-5 shadow-lg transform-rotate overflow-hidden" style="max-width: 80%;">
+                                <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=800" class="img-fluid" alt="Productos" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-3 mb-5 overflow-auto custom-scrollbar pb-2">
+                    <button v-for="cat in categories" :key="cat" 
+                            @click="activeCategory = cat" 
+                            @mouseenter="announce('Categoria ' + cat)" @focus="announce('Categoria ' + cat)"
+                            :class="['btn rounded-pill px-4 py-2 text-uppercase fw-bold flex-shrink-0', activeCategory === cat ? 'btn-success text-white' : 'bg-white text-muted border border-2']"
+                            style="font-size: calc(11px * var(--font-scale)); letter-spacing: 1px;">
+                        {{ cat }}
+                    </button>
+                </div>
+
+                <!-- Catálogo de productos -->
+                <div class="row g-4">
+                    <div class="col-12 col-sm-6 col-lg-3" v-for="product in filteredProducts" :key="product.id">
+                        <div class="card h-100 rounded-4 border-0 shadow-sm product-card" :class="{ 'is-out-of-stock': isOutOfStock(product) }" @mouseenter="announce(product.name + ', ' + product.category + ', S/ ' + getPrecioMin(product).toFixed(2) + (isOutOfStock(product) ? ', agotado' : ''))">
+                            <div class="position-relative">
+                                <img :src="product.img" class="card-img-top rounded-top-4 object-fit-cover" style="height: 260px;" :alt="product.name" />
+                                <span v-if="product.offer && !isOutOfStock(product)" class="badge bg-accent position-absolute top-0 start-0 m-3 py-2 px-3 text-uppercase rounded-pill fw-bold" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 1px;">OFERTA</span>
+                                <span v-if="isOutOfStock(product)" class="badge badge-stock-out position-absolute top-0 start-0 m-3 py-2 px-3 text-uppercase rounded-pill fw-bold" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 1px;">AGOTADO</span>
+                                <span v-else-if="isLowStock(product)" class="badge badge-stock-low position-absolute top-0 start-0 m-3 py-2 px-3 text-uppercase rounded-pill fw-bold" style="font-size: calc(9px * var(--font-scale)); letter-spacing: 1px;">{{ stockLabel(product) }}</span>
+                            </div>
+                            <div class="card-body d-flex flex-column p-4">
+                                <p class="text-success fw-bold text-uppercase mb-2" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 1px;">{{ product.category }}</p>
+                                <h5 class="card-title fw-bold font-serif mb-2" style="font-size: 1.15rem;">{{ product.name }}</h5>
+                                <div v-if="product.rating" class="d-flex align-items-center gap-2 mb-3">
+                                    <span class="rating-stars" style="font-size: calc(12px * var(--font-scale));">
+                                        <i data-lucide="star" style="width: 13px; height: 13px; fill: currentColor;"></i> {{ product.rating }}
+                                    </span>
+                                    <button @click="openReviews(product)" class="btn-reviews-link">{{ product.reviewCount }} reseñas</button>
+                                </div>
+                                <div class="mt-auto d-flex justify-content-between align-items-end">
+                                    <div class="d-flex flex-column">
+                                        <span class="fs-4 fw-bold">S/ {{ getPrecioMin(product).toFixed(2) }}</span>
+                                        <span v-if="getAhorro(product) > 0" class="text-decoration-line-through text-muted" style="font-size: calc(12px * var(--font-scale));">S/ {{ getPrecioMax(product).toFixed(2) }}</span>
+                                        <!-- Enlace de comparación de precios -->
+                                        <button @click="openPriceComparison(product)" @mouseenter="announce('Ver precios por puesto de ' + product.name)" @focus="announce('Ver precios por puesto de ' + product.name)" class="compare-link mt-1">
+                                            <i data-lucide="bar-chart-2" style="width: 11px;"></i>
+                                            Ver precios por puesto
+                                        </button>
+                                    </div>
+                                    <button @click="addToCart(product)" :disabled="isOutOfStock(product)"
+                                            @mouseenter="announce(isOutOfStock(product) ? (product.name + ', agotado') : ('Agregar ' + product.name + ' al carrito, S/ ' + getPrecioMin(product).toFixed(2)))"
+                                            @focus="announce(isOutOfStock(product) ? (product.name + ', agotado') : ('Agregar ' + product.name + ' al carrito, S/ ' + getPrecioMin(product).toFixed(2)))"
+                                            :aria-label="'Agregar ' + product.name + ' al carrito'"
+                                            class="btn btn-add-custom rounded-circle p-2 d-flex align-items-center justify-content-center" style="width: 45px; height: 45px;">
+                                        <i :data-lucide="isOutOfStock(product) ? 'x' : 'plus'" style="width: 20px;"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="bg-white border-top py-5 mt-5">
+            <div class="container d-flex flex-column flex-md-row justify-content-between align-items-center gap-4">
+                <h1 class="fs-5 fw-bold fst-italic font-serif m-0 d-flex align-items-center text-dark"><i data-lucide="leaf" class="text-success me-2"></i>Esencia Urbana</h1>
+                <div class="d-flex gap-4 text-muted fw-bold" style="font-size: calc(10px * var(--font-scale)); letter-spacing: 2px;">
+                    <span role="button" tabindex="0" @mouseenter="announce('Instagram')" @focus="announce('Instagram')" class="text-hover-success">INSTAGRAM</span>
+                    <span role="button" tabindex="0" @mouseenter="announce('WhatsApp')" @focus="announce('WhatsApp')" class="text-hover-success">WHATSAPP</span>
+                    <span role="button" tabindex="0" @mouseenter="announce('Sedes')" @focus="announce('Sedes')" class="text-hover-success">SEDES</span>
+                </div>
+            </div>
+        </footer>
+
+        <!-- PANEL DE SOPORTE -->
+        <div v-if="showSupportPanel" class="support-panel p-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold font-serif fs-6 mb-0">¿Necesitas ayuda?</h4>
+                <button @click="toggleSupportPanel" class="btn btn-link text-dark p-0"><i data-lucide="x" style="width: 18px;"></i></button>
+            </div>
+            <div v-if="!supportSent">
+                <p class="text-muted mb-3" style="font-size: calc(12.5px * var(--font-scale));">
+                    Cuéntanos qué problema tuviste (pago, pedido, producto) y te contactaremos a la brevedad.
+                </p>
+                <textarea v-model="supportMessage" rows="3" class="form-control rounded-3 mb-3" style="font-size: calc(13px * var(--font-scale));" placeholder="Escribe tu consulta o reporte aquí..."></textarea>
+                <button @click="sendSupportMessage" :disabled="!supportMessage.trim()" class="btn-checkout w-100" style="padding: 12px;">
+                    Enviar Reporte
+                </button>
+            </div>
+            <div v-else class="text-center py-3">
+                <i data-lucide="check-circle" class="text-success mb-2" style="width: 36px; height: 36px;"></i>
+                <p class="fw-bold mb-1" style="font-size: calc(13.5px * var(--font-scale));">¡Reporte enviado!</p>
+                <p class="text-muted mb-0" style="font-size: calc(12px * var(--font-scale));">Nuestro equipo te contactará pronto.</p>
+            </div>
+        </div>
+
+        <button @click="toggleSupportPanel" @mouseenter="announce('¿Necesitas ayuda? Abrir soporte')" @focus="announce('¿Necesitas ayuda? Abrir soporte')" class="support-fab" aria-label="Soporte">
+            <i :data-lucide="showSupportPanel ? 'x' : 'life-buoy'" style="width: 24px; height: 24px;"></i>
+        </button>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
